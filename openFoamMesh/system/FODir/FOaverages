@@ -1,0 +1,70 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2112                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+
+turbulenceFields1
+{
+
+    type                    turbulenceFields;
+    libs                    (fieldFunctionObjects);
+    fields                  (k L); 
+    enabled                 true;
+    writeControl            writeTime;
+    executeControl          timeStep;
+    executeInterval         1;
+}
+
+fieldAverage_U
+{
+    type            fieldAverage;
+    libs            (fieldFunctionObjects);
+    writeControl    writeTime;
+    fields
+    (
+        U
+        {
+            mean        on;
+            prime2Mean  on;
+            base        time;
+        }
+    );
+}
+
+fieldAverage_p
+{
+    type            fieldAverage;
+    libs            (fieldFunctionObjects);
+    writeControl    writeTime;
+    fields
+    (
+        p
+        {
+            mean        on;
+            prime2Mean  off;
+            base        time;
+        }
+    );
+}
+
+fieldAverage_k
+{
+    type            fieldAverage;
+    libs            (fieldFunctionObjects);
+    writeControl    writeTime;
+
+    fields
+    (
+        turbulenceProperties:k
+        {
+            mean        on;
+            prime2Mean  off;
+            base        time;
+        }
+    );
+}
+
+// ************************************************************************* //

@@ -1,0 +1,60 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2112                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// This example is for 2D airfoils.
+
+scale   1;
+
+vertices
+(
+    #include "BMLists/list_vertices_slice0"
+    #include "BMLists/list_vertices_slice1"
+);
+
+blocks
+(
+    #include "BMLists/list_blocks_layer0"
+);
+
+edges
+(
+    #include "BMLists/list_edges_slice0"
+    #include "BMLists/list_edges_slice1"
+);
+
+boundary
+(
+    #include "BMLists/list_boundaries_inlet"
+    #include "BMLists/list_boundaries_outlet"
+    #include "BMLists/list_boundaries_wing"
+    #include "BMLists/list_boundaries_frontAndBack"
+/* 
+    // For 3D wings: remove "frontAndBack", add "wingTip", and symmetry and interfaces    
+    #include "BMLists/list_boundaries_wingTip"
+    #include "BMLists/list_boundaries_symRoot"
+    #include "BMLists/list_boundaries_symTip"
+    #include "BMLists/list_boundaries_leftInterface"
+    #include "BMLists/list_boundaries_rightInterface"
+*/
+);
+
+mergePatchPairs
+(
+    // Only for 3D wings:
+    // (leftInterface rightInterface)
+);
+
+// ************************************************************************* //

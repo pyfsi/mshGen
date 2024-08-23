@@ -1,0 +1,17 @@
+#!/bin/sh
+cd "${0%/*}" || exit                                # Run from this directory
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions        # Tutorial run functions
+#------------------------------------------------------------------------------
+
+# clean case...
+./Allclean
+
+# create mesh...
+runApplication -s "0a" blockMesh
+runApplication -s "0b" blockMesh -write-vtk
+
+# check mesh...
+runApplication -s 0 checkMesh -writeFields '(aspectRatio nonOrthoAngle wallDistance)' -writeSets 'vtk'
+
+#------------------------------------------------------------------------------
+
