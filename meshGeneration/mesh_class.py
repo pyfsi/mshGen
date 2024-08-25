@@ -55,6 +55,7 @@ class Mesh:
         self.layer_aileron = params[5]
         self.mesh_scale = params[6]
         self.mesh_level = params[7]
+        self.grading_relaxation = params[8]
 
         # Flags:
         self.WRITE = flags[0]
@@ -676,6 +677,18 @@ class Mesh:
             grading_list[24][:4] = [g3, g3, h3, h3]
             grading_list[25][:4] = [1/g2, 1/g2, 1/h2, 1/h2]
             grading_list[26][:4] = [1/g1, 1/g1, 1/h1, 1/h1]
+
+            # vertical grading relaxation
+            if ((self.N_flow_layers > 0) and (layer >= self.N_wing_layers-1)):
+                ys = self.slice_locations[self.N_wing_layers-1]
+                ye = self.slice_locations[-1]
+                y0 = self.slice_locations[layer]
+                y1 = self.slice_locations[layer+1]
+                relaxation0 = 1 + (y0 - ys) / (ye - ys) * (self.grading_relaxation - 1)
+                relaxation1 = 1 + (y1 - ys) / (ye - ys) * (self.grading_relaxation - 1)
+                for n_block in range(N_interior, N_blck):
+                    grading_list[n_block][8:10] = [grading/relaxation0 for grading in grading_list[n_block][8:10]]
+                    grading_list[n_block][10:12] =[grading/relaxation1 for grading in grading_list[n_block][10:12]]
 
             # Specify grading of blocks
             for k, [blck, grd] in enumerate(zip(layer_block_list, grading_list)):
