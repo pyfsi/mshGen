@@ -22,7 +22,7 @@ User settings
 '''
 
 # Path (current working directory)
-path = "/mshGen/meshGeneration"
+path = "/cfdfile1/data/fm/thomash/Tools/mshGen/meshGeneration"
 
 # Airfoil name (Choose from "NACA0012", "Mrev-v2", "Mrev-v2_aileron")
 airfoil_name = "Mrev-v2"
@@ -52,6 +52,7 @@ slice_locations = [0., 4.65, 12.175, 13.17 - La, 20.24 + La, 21.235, 42.47]
 layer_resolution = [9, 14, 4, 70, 4, 40]
 layer_grading = [1, 1, 1 / 1.5, 1, 1.5, 1]
 layer_aileron = 3
+grading_relaxation = 5
 
 # Output folder for default files:
 foldername1 = path + "/default_files"
@@ -69,7 +70,7 @@ DEFAULT=True # True: Write default files; False: Read default files
 casename = airfoil_name+"_"+dim+"_"+wing_name+"_R"+"{:05.0f}".format(1e2*mesh_scale)+"C_"+mesh_level
 names = [casename, airfoil_name, wing_name]
 files = [filename1, filename2, foldername1, foldername2]
-params = [dim, COG, slice_locations, layer_resolution, layer_grading, layer_aileron, mesh_scale, mesh_level]
+params = [dim, COG, slice_locations, layer_resolution, layer_grading, layer_aileron, mesh_scale, mesh_level, grading_relaxation]
 flags = [WRITE, PRINT, PLOT, DEFAULT]
 
 # ---------------------- Create OpenFOAM mesh ---------------------- #
