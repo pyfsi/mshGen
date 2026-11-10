@@ -1225,15 +1225,15 @@ class Mesh:
                 # Write wing surfaces to OpenFOAM format, splitting upper (wingUp) and lower (wingDown) surface
                 for name, full, cut in [("wingUp", upper_full, upper_cut), ("wingDown", lower_full, lower_cut)]:
                     if self.N_flow_layers == 0:  # (Wing section only)
-                        blocks = surface_cut if self.AILERON else surface_full
+                        blocks = cut if self.AILERON else full
                         list_of_blocks = layer_blocks(range(self.N_wing_layers), blocks)
                     else:  # (incl. flow domain) - layers below skip are written to 'extra'
                         list_of_blocks = surface_blocks(range(skip, self.N_wing_layers), full, cut)
                     write_boundary(name, "wall", list_of_blocks, [1] * len(list_of_blocks))
 
-                    # Write additional surfaces not involved in FSI (first 'skip' layers)
-                    if name == "wingUp" and skip != 0 and self.AILERON == False:
-                        list_of_blocks = layer_blocks(range(skip), surface_full)
+                    # Write additional surfaces not involved in FSI (first 'skip' layers, upper and lower)
+                    if name == "wingUp" and skip != 0 and self.N_flow_layers != 0:
+                        list_of_blocks = surface_blocks(range(skip), surface_full, surface_cut)
                         write_boundary("extra", "wall", list_of_blocks, [1] * len(list_of_blocks))
 
                 # Write wing tip side to OpenFOAM format (tip surface is part of wingUp/wingDown)
