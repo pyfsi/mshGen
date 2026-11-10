@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# Generated blockMesh output from the example scripts
+output_files/

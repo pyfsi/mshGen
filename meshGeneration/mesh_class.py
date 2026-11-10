@@ -47,20 +47,23 @@ class Mesh:
         self.outputfolder = files[3]
 
         # Mesh parameters:
-        self.dim = params[0]
-        self.COG = params[1]
-        self.slice_locations = params[2]
-        self.layer_resolution = params[3]
-        self.layer_grading = params[4]
-        self.layer_aileron = params[5]
-        self.mesh_scale = params[6]
-        self.mesh_level = params[7]
+        self.dim               = params[0]
+        self.COG               = params[1]
+        self.slice_locations   = params[2]
+        self.layer_resolution  = params[3]
+        self.layer_grading     = params[4]
+        self.layer_aileron     = params[5]
+        self.mesh_scale        = params[6]
+        self.mesh_level        = params[7]
+        self.skip_layer        = params[8]
 
         # Flags:
-        self.WRITE = flags[0]
-        self.PRINT = flags[1]
-        self.PLOT = flags[2]
-        self.DEFAULT = flags[3]
+        self.WRITE             = flags[0]
+        self.PRINT             = flags[1]
+        self.PLOT              = flags[2]
+        self.DEFAULT           = flags[3]
+        self.SPLIT             = flags[4]
+        self.ARTIFICIOUS       = flags[5]
 
         # Print message
         if self.PRINT == True:
@@ -169,6 +172,39 @@ class Mesh:
             elif self.airfoil_name == "Mrev-v2":
                 interior_positions_list = [1.0] + [0.9, 0.89, 0.9] + [0.7, 0.69, 0.7] \
                                           + [0.3, 0.27, 0.3] + [0.1, 0.1] + [0.06, 0., 0.1, 0.11]
+            elif self.airfoil_name == "AP2":
+                interior_positions_list =  [1.0] + [0.9, 0.88, 0.9] + [0.7, 0.68, 0.7] \
+                                        + [0.29, 0.27, 0.275] + [0.05, 0.05] + [0.06, 0., 0.1, 0.11] #[0],[1,2,3],[4,5,6]
+                                                                                                    # [7,8,9],[10,11],[12,13,14,15]
+            elif self.airfoil_name == "AP2_aileron":
+                interior_positions_list =  [1.0] + [0.85, 0.84, 0.85] + [0.7, 0.7, 0.7] \
+                                        + [0.30, 0.29, 0.30] + [0.11, 0.11] + [0.085, 0., 0.1, 0.11] #[0],[1,2,3],[4,5,6]
+
+            elif self.airfoil_name == "AP2_H_tail":
+                interior_positions_list = [1.0] + [0.9, 0.895, 0.9] + [0.7, 0.69, 0.7] \
+                                          + [0.30, 0.29, 0.30] + [0.09, 0.09] + [0.085, 0., 0.1,0.11]  # [0],[1,2,3],[4,5,6]
+            elif self.airfoil_name == "AP2_V_tail":
+                interior_positions_list = [1.0] + [0.9, 0.89, 0.9] + [0.7, 0.69, 0.7] \
+                                          + [0.30, 0.29, 0.30] + [0.06, 0.06] + [0.085, 0., 0.1,
+                                                                                 0.11]
+
+            elif self.airfoil_name == "AP2_elevator":
+                interior_positions_list =  [1.0] + [0.85, 0.84, 0.85] + [0.7, 0.7, 0.7
+                                                                         ] \
+                                        + [0.30, 0.29, 0.30] + [0.11, 0.11] + [0.085, 0., 0.1, 0.11] #[0],[1,2,3],[4,5,6]
+
+            elif self.airfoil_name == "AP2_rudder":
+                interior_positions_list =  [1.0] + [0.85, 0.83, 0.85] + [0.7, 0.66, 0.7] \
+                                        + [0.30, 0.29, 0.30] + [0.11, 0.11] + [0.085, 0., 0.1, 0.11] #[0],[1,2,3],[4,5,6]
+
+            elif self.airfoil_name == "NACA0020":
+                interior_positions_list = [1.0] + [0.9, 0.89, 0.9] + [0.7, 0.69, 0.7] \
+                                        + [0.3, 0.29, 0.3] + [0.03, 0.03] + [0.06, 0., 0.1, 0.11]
+
+            elif self.airfoil_name == "NACA2420":
+                interior_positions_list = [1.0] + [0.9, 0.89, 0.9] + [0.7, 0.69, 0.7] \
+                                        + [0.3, 0.29, 0.3] + [0.03, 0.03] + [0.06, 0., 0.1, 0.11]
+
             else:
                 interior_positions_list = [1.0] + [0.9, 0.88, 0.9] + [0.7, 0.67, 0.7] \
                                         + 3*[0.3] + [0.1, 0.1] + [0.06, 0., 0.1, 0.11]
@@ -993,6 +1029,10 @@ class Mesh:
         N_blck = self.N_interior + self.N_exterior
         N_interior = self.N_interior
         N_exterior = self.N_exterior
+        skip = self.skip_layer
+
+        if self.ARTIFICIOUS == False:
+          skip = 0
 
         if self.WRITE==True:
 
@@ -1018,171 +1058,399 @@ class Mesh:
             # Wing BCs and sides BCs without aileron
             if self.AILERON==False:
 
-                # Write wing surface to OpenFOAM format
-                if self.N_flow_layers == 0:
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers) for element in list(range(self.N_interior+2, N_blck-2))]]
-                    list_of_face_index = [1]*len(list_of_blocks)
-                elif self.N_flow_layers != 0:
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers-1) for element in list(range(self.N_interior+2, N_blck-2))]]
-                    list_of_face_index = [1]*len(list_of_blocks)
-                filename = self.outputfolder + "/list_boundaries_wing"
-                name, type = ["wing", "wall"]
-                mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
-                if self.PRINT:
-                    print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+                if self.SPLIT == True:
 
-                # Write wing tip to OpenFOAM format
-                if self.N_flow_layers != 0:
-                    # Tip wing surface
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior+2, N_blck-2))]]
-                    list_of_face_index = [1]*len(list_of_blocks)
-                    # Tip side surface
-                    list_of_blocks +=[block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior))]]
-                    list_of_face_index += [5]*self.N_interior
-                    filename = self.outputfolder + "/list_boundaries_wingTip"
-                    name, type = ["wingTip", "wall"]
+                    # Write wing surfaces to OpenFOAM format, splitting top and down
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers) for element in list(range(self.N_interior+2, N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(skip,self.N_wing_layers) for element in list(range(self.N_interior+2, self.N_interior+7))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    filename = self.outputfolder + "/list_boundaries_wingUp"
+                    name, type = ["wingUp", "wall"]
                     mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
                     if self.PRINT:
                         print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
 
-                # Write sides (symmetries/frontAndBack) to OpenFOAM format
-                if self.dim == "3D":
-                    # Root symmetry
-                    list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                    list_of_face_index = [4]*len(list_of_blocks)
-                    filename = self.outputfolder + "/list_boundaries_symRoot"
-                    name, type = ["symRoot", "symmetry"]
+                    #write additional surfaces not involved in FSI
+                    if skip!=0:
+                      list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in list(range(skip)) for element in list(range(self.N_interior+2, N_blck-2))]]
+                      list_of_face_index = [1]*len(list_of_blocks)
+                      filename = self.outputfolder + "/list_boundaries_extra"
+                      name, type = ["extra", "wall"]
+                      mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                      if self.PRINT:
+                        print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers) for element in list(range(self.N_interior+2, N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(skip,self.N_wing_layers) for element in list(range(self.N_interior+7,N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    filename = self.outputfolder + "/list_boundaries_wingDown"
+                    name, type = ["wingDown", "wall"]
                     mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
                     if self.PRINT:
                         print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
 
-                    # Tip symmetry
-                    if self.N_flow_layers==0: # (Wing section only)
+                    # Write wing NACAtip to OpenFOAM format
+                    if self.N_flow_layers != 0:
+                        # Tip side surface
+                        list_of_blocks =[block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior))]]
+                        list_of_face_index = [5]*self.N_interior
+                        filename = self.outputfolder + "/list_boundaries_wingTip"
+                        name, type = ["wingTip", "wall"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+
+                    # Write sides (symmetries/frontAndBack) to OpenFOAM format
+                    if self.dim == "3D":
+                        # Root symmetry
                         list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                        list_of_face_index = [5]*len(list_of_blocks)
-                    elif self.N_flow_layers != 0: # (incl. flow domain)
-                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_layers-1] for element in list(range(N_blck))]]
-                        list_of_face_index = [5]*N_exterior + [5]*N_interior
-                    filename = self.outputfolder + "/list_boundaries_symTip"
-                    name, type = ["symTip", "symmetry"]
+                        list_of_face_index = [4]*len(list_of_blocks)
+                        filename = self.outputfolder + "/list_boundaries_symRoot"
+                        name, type = ["symRoot", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+
+                        # Tip symmetry
+                        if self.N_flow_layers==0: # (Wing section only)
+                            list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                            list_of_face_index = [5]*len(list_of_blocks)
+                        elif self.N_flow_layers != 0: # (incl. flow domain)
+                            list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_layers-1] for element in list(range(N_blck))]]
+                            list_of_face_index = [5]*N_exterior + [5]*N_interior
+                        filename = self.outputfolder + "/list_boundaries_symTip"
+                        name, type = ["symTip", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+                            print("")
+
+                    # Write front and back faces to OpenFOAM format
+                    elif self.dim == "2D":
+                        list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4]*len(list_of_blocks)
+                        list_of_blocks +=[block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index +=[5]*len(list_of_blocks)
+                        filename = self.outputfolder + "/list_boundaries_frontAndBack"
+                        name, type = ["frontAndBack", "empty"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>12s}".format(name) + ": List of faces written...")
+                            print("")
+
+                elif self.SPLIT == False:
+
+                    #Write wing surface to OpenFOAM format
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers) for element in list(range(self.N_interior+2, N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers-1) for element in list(range(self.N_interior+2, N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    filename = self.outputfolder + "/list_boundaries_wing"
+                    name, type = ["wing", "wall"]
                     mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
                     if self.PRINT:
                         print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
-                        print("")
 
-                # Write front and back faces to OpenFOAM format
-                elif self.dim == "2D":
-                    list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                    list_of_face_index = [4]*len(list_of_blocks)
-                    list_of_blocks +=[block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                    list_of_face_index +=[5]*len(list_of_blocks)
-                    filename = self.outputfolder + "/list_boundaries_frontAndBack"
-                    name, type = ["frontAndBack", "empty"]
-                    mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
-                    if self.PRINT:
-                        print("Boundary condition " + "{:>12s}".format(name) + ": List of faces written...")
-                        print("")
+                    # Write wing tip to OpenFOAM format
+                    if self.N_flow_layers != 0:
+                        # Tip wing surface
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior+2, N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                        # Tip side surface
+                        list_of_blocks +=[block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior))]]
+                        list_of_face_index += [5]*self.N_interior
+                        filename = self.outputfolder + "/list_boundaries_wingTip"
+                        name, type = ["wingTip", "wall"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+
+                    # Write sides (symmetries/frontAndBack) to OpenFOAM format
+                    if self.dim == "3D":
+                        # Root symmetry
+                        list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4]*len(list_of_blocks)
+                        filename = self.outputfolder + "/list_boundaries_symRoot"
+                        name, type = ["symRoot", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+
+                        # Tip symmetry
+                        if self.N_flow_layers==0: # (Wing section only)
+                            list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                            list_of_face_index = [5]*len(list_of_blocks)
+                        elif self.N_flow_layers != 0: # (incl. flow domain)
+                            list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_layers-1] for element in list(range(N_blck))]]
+                            list_of_face_index = [5]*N_exterior + [5]*N_interior
+                        filename = self.outputfolder + "/list_boundaries_symTip"
+                        name, type = ["symTip", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+                            print("")
+
+                    # Write front and back faces to OpenFOAM format
+                    elif self.dim == "2D":
+                        list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4]*len(list_of_blocks)
+                        list_of_blocks +=[block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index +=[5]*len(list_of_blocks)
+                        filename = self.outputfolder + "/list_boundaries_frontAndBack"
+                        name, type = ["frontAndBack", "empty"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>12s}".format(name) + ": List of faces written...")
+                            print("")
 
             # Wing BCs and sides BCs WITH aileron
             elif self.AILERON==True:
-                # Write wing surface to OpenFOAM format
-                if self.N_flow_layers == 0:
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers) for element in list(range(self.N_interior+4, N_blck-4))]]
-                    list_of_face_index = [1]*len(list_of_blocks)
-                elif self.N_flow_layers != 0:
-                    list_blocks_full_surface = list(range(self.N_interior + 2, N_blck - 2))
-                    list_blocks_cut_surface = list(range(self.N_interior + 4, N_blck - 4))
-                    list_layers_full_surface = list(range(self.N_wing_layers - 1))
-                    list_layers_full_surface.remove(self.layer_aileron)
-                    list_layers_cut_surface = [self.layer_aileron]
-                    list_blocks_surface = [element + N_blck * layer for layer in list_layers_full_surface for element in list_blocks_full_surface]
-                    list_blocks_surface+= [element + N_blck * layer for layer in list_layers_cut_surface for element in list_blocks_cut_surface]
-                    list_of_blocks = [block_list[i] for i in list_blocks_surface]
-                    list_of_face_index = [1]*len(list_of_blocks)
-                filename = self.outputfolder + "/list_boundaries_wing"
-                name, type = ["wing", "wall"]
-                mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
-                if self.PRINT:
-                    print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
 
-                # Write wing tip to OpenFOAM format
-                if self.N_flow_layers != 0:
-                    # Tip wing surface
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior+2, N_blck-2))]]
-                    list_of_face_index = [1]*len(list_of_blocks)
-                    # Tip side surface
-                    list_of_blocks +=[block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior))]]
-                    list_of_face_index += [5]*self.N_interior
-                    filename = self.outputfolder + "/list_boundaries_wingTip"
-                    name, type = ["wingTip", "wall"]
+                if self.SPLIT == True:
+                    # Write wingUp surface to OpenFOAM format
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in
+                                          [element + N_blck * layer for layer in range(self.N_wing_layers) for element in
+                                           list(range(self.N_interior + 4, N_blck - 4))]]
+                        list_of_face_index = [1] * len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_blocks_full_surface = list(range(self.N_interior + 2, self.N_interior + 7))
+                        list_blocks_cut_surface = list(range(self.N_interior + 4, self.N_interior + 7))
+                        list_layers_full_surface = list(range(skip,self.N_wing_layers))
+                        list_layers_full_surface.remove(self.layer_aileron)
+                        list_layers_cut_surface = [self.layer_aileron]
+                        list_blocks_surface = [element + N_blck * layer for layer in list_layers_full_surface for element in
+                                               list_blocks_full_surface]
+                        list_blocks_surface += [element + N_blck * layer for layer in list_layers_cut_surface for element in
+                                                list_blocks_cut_surface]
+                        list_of_blocks = [block_list[i] for i in list_blocks_surface]
+                        list_of_face_index = [1] * len(list_of_blocks)
+                    filename = self.outputfolder + "/list_boundaries_wingUp"
+                    name, type = ["wingUp", "wall"]
+                    mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                    if self.PRINT:
+                        print("Boundary condition " + "{:>7s}".format(name) + ": List of faces written...")
+
+                    # Write wingDown surface to OpenFOAM format
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in
+                                          [element + N_blck * layer for layer in range(self.N_wing_layers) for element in
+                                           list(range(self.N_interior + 4, N_blck - 4))]]
+                        list_of_face_index = [1] * len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_blocks_full_surface = list(range(self.N_interior + 7, N_blck - 2))
+                        list_blocks_cut_surface = list(range(self.N_interior + 7, N_blck - 4))
+                        list_layers_full_surface = list(range(skip,self.N_wing_layers))
+                        list_layers_full_surface.remove(self.layer_aileron)
+                        list_layers_cut_surface = [self.layer_aileron]
+                        list_blocks_surface = [element + N_blck * layer for layer in list_layers_full_surface for element in
+                                               list_blocks_full_surface]
+                        list_blocks_surface += [element + N_blck * layer for layer in list_layers_cut_surface for element in
+                                                list_blocks_cut_surface]
+                        list_of_blocks = [block_list[i] for i in list_blocks_surface]
+                        list_of_face_index = [1] * len(list_of_blocks)
+                    filename = self.outputfolder + "/list_boundaries_wingDown"
+                    name, type = ["wingDown", "wall"]
+                    mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                    if self.PRINT:
+                        print("Boundary condition " + "{:>7s}".format(name) + ": List of faces written...")
+
+                    # Write wing tip to OpenFOAM format
+                    if self.N_flow_layers != 0:
+                        # Tip side surface
+                        list_of_blocks = [block_list[i] for i in
+                                           [element + N_blck * layer for layer in [self.N_wing_layers - 1] for element in
+                                            list(range(self.N_interior))]]
+                        list_of_face_index = [5] * self.N_interior
+                        filename = self.outputfolder + "/list_boundaries_wingTip"
+                        name, type = ["wingTip", "wall"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>7s}".format(name) + ": List of faces written...")
+
+                    # Write aileron cut-out to OpenFOAM format
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in
+                                          [element + N_blck * layer for layer in [self.layer_aileron] for element in
+                                           [1, 2]]]
+                        list_of_face_index = [2] * len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_of_blocks = [block_list[i] for i in
+                                          [element + N_blck * layer for layer in [self.layer_aileron] for element in
+                                           [1, 2]]]
+                        list_of_face_index = [2] * 2
+                        list_of_blocks += [block_list[i] for i in
+                                           [element + N_blck * layer for layer in [self.layer_aileron] for element in
+                                            [0, 1, 2]]]
+                        list_of_face_index += [5] * 3
+                        if self.layer_aileron != 0:
+                            list_of_blocks += [block_list[i] for i in
+                                               [element + N_blck * layer for layer in [self.layer_aileron] for element in
+                                                [0, 1, 2]]]
+                            list_of_face_index += [4] * 3
+                    filename = self.outputfolder + "/list_boundaries_wingCut"
+                    name, type = ["wingCut", "wall"]
+                    mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                    if self.PRINT:
+                        print("Boundary condition " + "{:>7s}".format(name) + ": List of faces written...")
+
+                    # Write sides (symmetries/frontAndBack) to OpenFOAM format
+                    if self.dim == "3D":
+                        # Root symmetry
+                        list_of_blocks = [block_list[i] for i in
+                                          [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4] * len(list_of_blocks)
+                        if self.layer_aileron == 0:
+                            list_of_blocks += [block_list[i] for i in
+                                               [element + N_blck * layer for layer in [self.layer_aileron] for element in
+                                                [0, 1, 2]]]
+                            list_of_face_index += [4] * 3
+                        filename = self.outputfolder + "/list_boundaries_symRoot"
+                        name, type = ["symRoot", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>7s}".format(name) + ": List of faces written...")
+
+                        # Tip symmetry
+                        if self.N_flow_layers == 0:  # (Wing section only)
+                            list_of_blocks = [block_list[i] for i in
+                                              [element for element in list(range(self.N_interior, N_blck))]]
+                            list_of_face_index = [5] * len(list_of_blocks)
+                            list_of_blocks += [block_list[i] for i in
+                                               [element + N_blck * layer for layer in [self.layer_aileron] for element in
+                                                [0, 1, 2]]]
+                            list_of_face_index += [5] * 3
+                        elif self.N_flow_layers != 0:  # (incl. flow domain)
+                            list_of_blocks = [block_list[i] for i in
+                                              [element + N_blck * layer for layer in [self.N_layers - 1] for element in
+                                               list(range(N_blck))]]
+                            list_of_face_index = [5] * N_exterior + [5] * N_interior
+                        filename = self.outputfolder + "/list_boundaries_symTip"
+                        name, type = ["symTip", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>7s}".format(name) + ": List of faces written...")
+                            print("")
+
+                    # Write front and back faces to OpenFOAM format
+                    elif self.dim == "2D":
+                        list_of_blocks = [block_list[i] for i in
+                                          [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4] * len(list_of_blocks)
+                        list_of_blocks += [block_list[i] for i in
+                                           [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index += [5] * len(list_of_blocks)
+                        filename = self.outputfolder + "/list_boundaries_frontAndBack"
+                        name, type = ["frontAndBack", "empty"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>12s}".format(name) + ": List of faces written...")
+                            print("")
+
+                elif self.SPLIT == False:
+                    # Write wing surface to OpenFOAM format
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in range(self.N_wing_layers) for element in list(range(self.N_interior+4, N_blck-4))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_blocks_full_surface = list(range(self.N_interior + 2, N_blck - 2))
+                        list_blocks_cut_surface = list(range(self.N_interior + 4, N_blck - 4))
+                        list_layers_full_surface = list(range(self.N_wing_layers - 1))
+                        list_layers_full_surface.remove(self.layer_aileron)
+                        list_layers_cut_surface = [self.layer_aileron]
+                        list_blocks_surface = [element + N_blck * layer for layer in list_layers_full_surface for element in list_blocks_full_surface]
+                        list_blocks_surface+= [element + N_blck * layer for layer in list_layers_cut_surface for element in list_blocks_cut_surface]
+                        list_of_blocks = [block_list[i] for i in list_blocks_surface]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                    filename = self.outputfolder + "/list_boundaries_wing"
+                    name, type = ["wing", "wall"]
                     mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
                     if self.PRINT:
                         print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
 
-                # Write aileron cut-out to OpenFOAM format
-                if self.N_flow_layers == 0:
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [1,2]]]
-                    list_of_face_index = [2]*len(list_of_blocks)
-                elif self.N_flow_layers != 0:
-                    list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [1,2]]]
-                    list_of_face_index = [2]*2
-                    list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
-                    list_of_face_index+= [5]*3
-                    if self.layer_aileron != 0:
-                        list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
-                        list_of_face_index+= [4]*3
-                filename = self.outputfolder + "/list_boundaries_wingCut"
-                name, type = ["wingCut", "wall"]
-                mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
-                if self.PRINT:
-                    print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+                    # Write wing tip to OpenFOAM format
+                    if self.N_flow_layers != 0:
+                        # Tip wing surface
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior+2, N_blck-2))]]
+                        list_of_face_index = [1]*len(list_of_blocks)
+                        # Tip side surface
+                        list_of_blocks +=[block_list[i] for i in [element + N_blck * layer for layer in [self.N_wing_layers-1] for element in list(range(self.N_interior))]]
+                        list_of_face_index += [5]*self.N_interior
+                        filename = self.outputfolder + "/list_boundaries_wingTip"
+                        name, type = ["wingTip", "wall"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
 
-
-                # Write sides (symmetries/frontAndBack) to OpenFOAM format
-                if self.dim == "3D":
-                    # Root symmetry
-                    list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                    list_of_face_index = [4]*len(list_of_blocks)
-                    if self.layer_aileron==0:
-                        list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
-                        list_of_face_index+= [4]*3
-                    filename = self.outputfolder + "/list_boundaries_symRoot"
-                    name, type = ["symRoot", "symmetry"]
-                    mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
-                    if self.PRINT:
-                        print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
-
-                    # Tip symmetry
-                    if self.N_flow_layers==0: # (Wing section only)
-                        list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                        list_of_face_index = [5]*len(list_of_blocks)
+                    # Write aileron cut-out to OpenFOAM format
+                    if self.N_flow_layers == 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [1,2]]]
+                        list_of_face_index = [2]*len(list_of_blocks)
+                    elif self.N_flow_layers != 0:
+                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [1,2]]]
+                        list_of_face_index = [2]*2
                         list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
                         list_of_face_index+= [5]*3
-                    elif self.N_flow_layers != 0: # (incl. flow domain)
-                        list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_layers-1] for element in list(range(N_blck))]]
-                        list_of_face_index = [5]*N_exterior + [5]*N_interior
-                    filename = self.outputfolder + "/list_boundaries_symTip"
-                    name, type = ["symTip", "symmetry"]
+                        if self.layer_aileron != 0:
+                            list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
+                            list_of_face_index+= [4]*3
+                    filename = self.outputfolder + "/list_boundaries_wingCut"
+                    name, type = ["wingCut", "wall"]
                     mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
                     if self.PRINT:
                         print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
-                        print("")
-
-                # Write front and back faces to OpenFOAM format
-                elif self.dim == "2D":
-                    list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                    list_of_face_index = [4]*len(list_of_blocks)
-                    list_of_blocks +=[block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
-                    list_of_face_index +=[5]*len(list_of_blocks)
-                    filename = self.outputfolder + "/list_boundaries_frontAndBack"
-                    name, type = ["frontAndBack", "empty"]
-                    mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
-                    if self.PRINT:
-                        print("Boundary condition " + "{:>12s}".format(name) + ": List of faces written...")
-                        print("")
 
 
+                    # Write sides (symmetries/frontAndBack) to OpenFOAM format
+                    if self.dim == "3D":
+                        # Root symmetry
+                        list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4]*len(list_of_blocks)
+                        if self.layer_aileron==0:
+                            list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
+                            list_of_face_index+= [4]*3
+                        filename = self.outputfolder + "/list_boundaries_symRoot"
+                        name, type = ["symRoot", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
 
+                        # Tip symmetry
+                        if self.N_flow_layers==0: # (Wing section only)
+                            list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                            list_of_face_index = [5]*len(list_of_blocks)
+                            list_of_blocks+= [block_list[i] for i in [element + N_blck * layer for layer in [self.layer_aileron] for element in [0,1,2]]]
+                            list_of_face_index+= [5]*3
+                        elif self.N_flow_layers != 0: # (incl. flow domain)
+                            list_of_blocks = [block_list[i] for i in [element + N_blck * layer for layer in [self.N_layers-1] for element in list(range(N_blck))]]
+                            list_of_face_index = [5]*N_exterior + [5]*N_interior
+                        filename = self.outputfolder + "/list_boundaries_symTip"
+                        name, type = ["symTip", "symmetry"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition "+"{:>7s}".format(name)+": List of faces written...")
+                            print("")
+
+                    # Write front and back faces to OpenFOAM format
+                    elif self.dim == "2D":
+                        list_of_blocks = [block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index = [4]*len(list_of_blocks)
+                        list_of_blocks +=[block_list[i] for i in [element for element in list(range(self.N_interior, N_blck))]]
+                        list_of_face_index +=[5]*len(list_of_blocks)
+                        filename = self.outputfolder + "/list_boundaries_frontAndBack"
+                        name, type = ["frontAndBack", "empty"]
+                        mf.write_boundaries_to_file(filename, name, type, list_of_blocks, list_of_face_index)
+                        if self.PRINT:
+                            print("Boundary condition " + "{:>12s}".format(name) + ": List of faces written...")
+                            print("")
 
 # ---------------------- END ---------------------- #
 
