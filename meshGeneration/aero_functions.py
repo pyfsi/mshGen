@@ -50,6 +50,10 @@ def read_airfoil_file(name, filename):
 def read_wing_file(filename):
     '''
     Load wing properties
+
+    Columns: [station (unused), y, chord, beta, dx] and an optional 6th column dz (dihedral:
+    vertical shift of the section). Files with 5 columns get dz = 0.
+    Always returns an (n, 6) array.
     '''
 
     # Check if folder exists
@@ -64,16 +68,24 @@ def read_wing_file(filename):
     # Re-open file
     with open(filename) as f:
 
-        # Initialize array
-        data = np.zeros((n,5))
+        # Initialize array (6th column dz defaults to 0)
+        data = np.zeros((n,6))
 
         # Read lines
         for line, k in zip(f, range(n)):
-            data[k,:] = [float(val) for val in line.rstrip('\n').split()]
+            values = [float(val) for val in line.rstrip('\n').split()]
+            if len(values) not in (5, 6):
+                raise ValueError("Wing file " + filename + ", line " + str(k+1) + ": expected 5 or 6 columns, got " + str(len(values)))
+            data[k,:len(values)] = values
 
     return data
 
 def interpolate_wing_shape(filename, y):
+    '''
+    Interpolate the wing properties at spanwise location y.
+    Returns b (span), c (chord), dx (shift), beta (twist), dz (dihedral shift).
+    Beyond the tip, the tip values are used.
+    '''
 
     # Read wing file
     if filename == None:
@@ -81,12 +93,13 @@ def interpolate_wing_shape(filename, y):
         c = 1.
         dx = 0.
         beta = 0.
+        dz = 0.
     else:
         if os.path.exists(filename):
             data = read_wing_file(filename)
 
-            # Span
-            b = round(2 * data[:, 1].max(), 2)
+            # Span (exact; Mesh.initialize_mesh applies a tolerance when classifying slices near the tip)
+            b = 2 * data[:, 1].max()
 
             # Wingspan location
             if (abs(y) <= b / 2.):
@@ -103,14 +116,18 @@ def interpolate_wing_shape(filename, y):
             # Beta:
             beta = np.interp(y_interp, data[:, 1], data[:, 3])
 
+            # Dihedral (vertical shift):
+            dz = np.interp(y_interp, data[:, 1], data[:, 5])
+
         else:
             print("Error - No such wing file: "+filename)
             b = 1.
             c = 1.
             dx = 0.
             beta = 0.
+            dz = 0.
 
-    return b, c, dx, beta
+    return b, c, dx, beta, dz
 
 #--------------------------------------------------------#
 
@@ -331,7 +348,7 @@ class RawData:
             self.corrupted_point = coordinates[self.N_corrupted_point]
             coordinates = np.delete(coordinates, self.N_corrupted_point, axis=0)
             self.coordinates = coordinates
-        elif name == "NACA0012":
+        elif name == "NACA0012" or name == "AP2":
             self.N_corrupted_point = int(len(coordinates)/2)
             self.corrupted_point = coordinates[self.N_corrupted_point]
             coordinates = np.delete(coordinates, self.N_corrupted_point, axis=0)
@@ -352,6 +369,9 @@ class RawData:
         elif name == "FFA_W3_211":
             xc = [coordinates[n, 0], 0.20, 0.80, coordinates[m, 0]]
             yc = [coordinates[n, 1], 0.03, 0.02, coordinates[m, 1]]
+        elif name == "AP2":
+            xc = [coordinates[n, 0], 0.20, 0.80, coordinates[m, 0]]
+            yc = [coordinates[n, 1], 0.0356, 0.0191, coordinates[m, 1]]
         else:
             xc = [coordinates[n, 0], coordinates[m, 0]]
             yc = [coordinates[n, 1], coordinates[m, 1]]
@@ -414,10 +434,10 @@ class ScaledData:
 
         # ------------------- Rotate, Scale and Shift ------------------- #
 
-        b, c, dx, beta = interpolate_wing_shape(filename, y)
-        coordinates_upper = scale_coordinates(x_spline_upper, y_spline_upper, -beta, c, [-(COG[0]+dx), -COG[2]])
-        coordinates_camber = scale_coordinates(x_spline_camber, y_spline_camber, -beta, c, [-(COG[0]+dx), -COG[2]])
-        coordinates_lower = scale_coordinates(x_spline_lower, y_spline_lower, -beta, c, [-(COG[0]+dx), -COG[2]])
+        b, c, dx, beta, dz = interpolate_wing_shape(filename, y)
+        coordinates_upper = scale_coordinates(x_spline_upper, y_spline_upper, -beta, c, [-(COG[0]+dx), -COG[2]+dz])
+        coordinates_camber = scale_coordinates(x_spline_camber, y_spline_camber, -beta, c, [-(COG[0]+dx), -COG[2]+dz])
+        coordinates_lower = scale_coordinates(x_spline_lower, y_spline_lower, -beta, c, [-(COG[0]+dx), -COG[2]+dz])
         self.c = c
 
         # ------------------- New spline function after scaling------------------- #
