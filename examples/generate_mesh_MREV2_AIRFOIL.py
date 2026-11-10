@@ -6,15 +6,19 @@ description: Generate files for blockMesh utility
 '''
 
 # Imports
-from mshGen.meshGeneration.mesh_class import Mesh
-from matplotlib import pyplot as plt
 import os
+import sys
+from matplotlib import pyplot as plt
 
+# mshGen location, derived from this script (<...>/mshGen/examples/<script>.py)
+path_mshGen = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "meshGeneration"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(path_mshGen)))
+from mshGen.meshGeneration.mesh_class import Mesh
 
 # ---------------------- Initialization ---------------------- #
 
 # Initialization
-path = os.getcwd()
+path_cwd = os.getcwd()
 plt.close("all")
 
 # ---------------------- User settings ---------------------- #
@@ -22,19 +26,16 @@ plt.close("all")
 User settings
 '''
 
-# Path to "mshGen" tool
-path = "/mshGen/meshGeneration"
-
 # Airfoil name (Choose from "NACA0012", "Mrev-v2", "Mrev-v2_aileron")
 airfoil_name = "Mrev-v2"
 
-# Airfoil file (Add airfoil file to './airfoils/' directory)
-filename1 = path + "/airfoils/Mrev-v2.txt"
+# Airfoil file (Add airfoil file to mshGen/meshGeneration/airfoils/)
+filename1 = path_mshGen + "/airfoils/Mrev-v2.txt"
 
 # Wing name (User-specific)
 wing_name = "AIRFOIL"
 
-# Wing file (Add wing file to './wings/' directory)
+# Wing file (Add wing file to mshGen/meshGeneration/wings/)
 filename2 = None
 
 # Case dimension (Choose from "2D" or "3D"):
@@ -50,12 +51,14 @@ slice_locations = [0., 1.]
 layer_resolution = [1]
 layer_grading = [1.]
 layer_aileron = None
+skip_layer = 1          # Not skipping if ARTIFICIOUS = False
 
 # Output folder for default files:
-foldername1 = path + "/default_files"
+foldername1 = path_mshGen + "/default_files"
 
 # Output folder for BlockMesh files:
-foldername2 = path + "/output_files"
+foldername2 = path_cwd + "/output_files"
+os.makedirs(foldername2, exist_ok=True)
 
 # Flags
 WRITE=True
@@ -63,12 +66,16 @@ PRINT=True
 PLOT=False
 DEFAULT=True # True: Write default files; False: Read default files
 
+# Optional flags to split surfaces, used to match surface for FSI
+SPLIT = False
+ARTIFICIOUS = False
+
 # Create inputs of Mesh instance (No user action needed)
 casename = airfoil_name+"_"+dim+"_"+wing_name+"_R"+"{:05.0f}".format(1e2*mesh_scale)+"C_"+mesh_level
 names = [casename, airfoil_name, wing_name]
 files = [filename1, filename2, foldername1, foldername2]
-params = [dim, COG, slice_locations, layer_resolution, layer_grading, layer_aileron, mesh_scale, mesh_level]
-flags = [WRITE, PRINT, PLOT, DEFAULT]
+params = [dim, COG, slice_locations, layer_resolution, layer_grading, layer_aileron, mesh_scale, mesh_level, skip_layer]
+flags = [WRITE, PRINT, PLOT, DEFAULT, SPLIT, ARTIFICIOUS]
 
 # ---------------------- Create OpenFOAM mesh ---------------------- #
 '''

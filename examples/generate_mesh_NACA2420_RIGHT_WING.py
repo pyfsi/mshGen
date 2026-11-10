@@ -6,9 +6,14 @@ description: Generate files for blockMesh utility (NACA2420 right wing, 3D, with
 '''
 
 # Imports
-from mshGen.meshGeneration.mesh_class import Mesh
-from matplotlib import pyplot as plt
 import os
+import sys
+from matplotlib import pyplot as plt
+
+# mshGen location, derived from this script (<...>/mshGen/examples/<script>.py)
+path_mshGen = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "meshGeneration"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(path_mshGen)))
+from mshGen.meshGeneration.mesh_class import Mesh
 
 # ---------------------- Initialization ---------------------- #
 
@@ -21,20 +26,17 @@ plt.close("all")
 User settings
 '''
 
-# Path mshGen/meshGeneration
-path_mshGen = "/cfdfile1/data/fm/niels/awesim/software/mshGen/meshGeneration"
-
 # Airfoil name (Choose from "NACA0012", "NACA2420", "Mrev-v2", "Mrev-v2_aileron", "AP2")
 airfoil_name = "NACA2420"
 
-# Airfoil file (Add airfoil file to './airfoils/' directory)
-filename1 = path_cwd + "/airfoils/NACA2420.txt"
+# Airfoil file (Add airfoil file to mshGen/meshGeneration/airfoils/)
+filename1 = path_mshGen + "/airfoils/NACA2420.txt"
 
 # Wing name (User-specific)
 wing_name = "right_wing"
 
-# Wing file (Add wing file to './wings/' directory)
-filename2 = path_cwd + "/wings/right_wing.txt"
+# Wing file (Add wing file to mshGen/meshGeneration/wings/)
+filename2 = path_mshGen + "/wings/right_wing.txt"
 
 # Case dimension (Choose from "2D" or "3D"):
 dim = "3D"
@@ -56,6 +58,7 @@ foldername1 = path_mshGen + "/default_files"
 
 # Output folder for BlockMesh files:
 foldername2 = path_cwd + "/output_files"
+os.makedirs(foldername2, exist_ok=True)
 
 # Flags
 WRITE = True

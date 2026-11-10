@@ -6,9 +6,14 @@ description: Generate files for blockMesh utility
 '''
 
 # Imports
-from mshGen.meshGeneration.mesh_class import Mesh
-from matplotlib import pyplot as plt
 import os
+import sys
+from matplotlib import pyplot as plt
+
+# mshGen location, derived from this script (<...>/mshGen/examples/<script>.py)
+path_mshGen = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "meshGeneration"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(path_mshGen)))
+from mshGen.meshGeneration.mesh_class import Mesh
 
 # ---------------------- Initialization ---------------------- #
 
@@ -21,19 +26,16 @@ plt.close("all")
 User settings
 '''
 
-# Path mshGen/meshGeneration
-path_mshGen = "/cfdfile1/data/fm/niels/awesim/software/mshGen/meshGeneration"
-
 # Airfoil name (Choose from "NACA0012", "Mrev-v2", "Mrev-v2_aileron")
 airfoil_name = "Mrev-v2"
 
-# Airfoil file (Add airfoil file to './airfoils/' directory)
-filename1 = path_cwd + "/airfoils/Mrev-v2.txt"
+# Airfoil file (Add airfoil file to mshGen/meshGeneration/airfoils/)
+filename1 = path_mshGen + "/airfoils/Mrev-v2.txt"
 
 # Wing name (User-specific)
 wing_name = "WING"
 
-# Wing file (Add wing file to './wings/' directory)
+# Wing file (Add wing file to mshGen/meshGeneration/wings/)
 filename2 = None
 
 # Case dimension (Choose from "2D" or "3D"):
@@ -58,6 +60,7 @@ foldername1 = path_mshGen + "/default_files"
 
 # Output folder for BlockMesh files:
 foldername2 = path_cwd + "/output_files"
+os.makedirs(foldername2, exist_ok=True)
 
 # Flags
 WRITE=True
