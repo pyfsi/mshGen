@@ -1,0 +1,11 @@
+0:00  Introduction
+0:32  The window and the sidebar
+1:33  New case
+1:55  Step 1: Geometry
+5:13  Step 2: Domain
+6:15  Step 3: Blocks
+8:30  Step 4: Meshing - helpers
+10:00  Step 4: Meshing - quality optimiser
+10:33  Step 4: Meshing - settings and preview
+12:07  Step 5: Build & check
+13:39  Files and next steps

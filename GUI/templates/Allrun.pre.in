@@ -1,0 +1,58 @@
+#!/bin/bash
+# Allrun.pre: build the mesh of case "@NAME@" (written by the mshGen GUI from case.json; do not edit)
+#   1. generate_mesh.py      -> output_files/ (blockMesh lists) + system/blockMeshDict
+#   2. blockMesh + checkMesh -> constant/polyMesh (+ aspectRatio, wallDistance)
+#   3. foamMeshToFluent      -> fluentInterface/@NAME@.msh   (if enabled in case.json)
+#   4. ./Allrun.pre --images -> images/: mshGen plots, ParaView views (GUI/tools/visualize_mesh.py with
+#                               images.json), then ./Allrun.images if this case has one
+cd "$(dirname "$0")" || exit
+set -e
+type module > /dev/null 2>&1 || source /etc/profile.d/modules.sh
+
+PYTHON_MODULE="@PYTHON_MODULE@"
+OPENFOAM_MODULE="@OPENFOAM_MODULE@"
+PARAVIEW_MODULE="@PARAVIEW_MODULE@"
+FLUENT=@FLUENT@
+MSHGEN_DIR="${MSHGEN_DIR:-$(cd "@MSHGEN_RELPATH@" && pwd)}"
+
+echo "== mshGen: generate_mesh.py"
+module purge
+module load "$PYTHON_MODULE"
+python generate_mesh.py > log.mshGen 2>&1 || { tail -20 log.mshGen; exit 1; }
+
+echo "== blockMesh"
+module purge
+module load "$OPENFOAM_MODULE"
+source "$FOAM_BASH"
+rm -rf constant/polyMesh fluentInterface
+blockMesh > log.blockMesh 2>&1 || { tail -20 log.blockMesh; exit 1; }
+
+echo "== checkMesh"
+checkMesh -writeFields '(aspectRatio wallDistance)' > log.checkMesh 2>&1 || true
+grep -E "cells:|\*\*\*|Mesh OK|Failed" log.checkMesh || true
+
+if [ "$FLUENT" = "yes" ]; then
+    echo "== foamMeshToFluent"
+    foamMeshToFluent > log.foamMeshToFluent 2>&1 || { tail -20 log.foamMeshToFluent; exit 1; }
+    ls -l fluentInterface/@NAME@.msh
+fi
+
+if [ "$1" = "--images" ]; then
+    echo "== images"
+    rm -rf images
+    module purge
+    module load "$PYTHON_MODULE"
+    python generate_mesh.py --save-plots > log.images 2>&1
+    grep "^Written images" log.images || true
+    if [ -f images.json ]; then
+        module purge
+        module load "$PARAVIEW_MODULE"
+        pvbatch --force-offscreen-rendering "$MSHGEN_DIR/GUI/tools/visualize_mesh.py" images.json \
+            > log.paraview 2>&1 || { tail -20 log.paraview; exit 1; }
+        grep "^written images" log.paraview || true
+    fi
+    if [ -x ./Allrun.images ]; then
+        ./Allrun.images
+    fi
+fi
+echo "== done"
