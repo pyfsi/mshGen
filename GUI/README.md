@@ -119,7 +119,8 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
   folded blocks; hover a block for its number and corner angles. Edge names e00–e10 are drawn,
   with zoom presets for the whole domain, the airfoil and the trailing edge.
 
-**Block vertices panel** (steps 2–4 in full; in step 1 as the status line "Effect on the blocks")
+**Block vertices panel** (step 3 in full; in steps 1, 2 and 4 as the status line "Effect on the blocks",
+whose details open by themselves when the vertices are outdated or a block is invalid)
 - Where the vertices come from: mshGen defaults, outdated, or custom.
 - Recompute button.
 - Warnings for missing mshGen defaults and for vertices off the outer boundary.

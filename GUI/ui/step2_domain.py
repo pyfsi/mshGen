@@ -47,7 +47,7 @@ class DomainStep:
             pn.pane.Markdown("### C-grid"), self.scale, self.level, self.scale_info,
             self.far_box,
             pn.pane.Markdown("### Flow conditions"), self.U, self.nu, self.flow_info,
-            pn.pane.Markdown("### Block vertices"), self.vertex_box,
+            pn.pane.Markdown("### Effect on the blocks"), self.vertex_box,
             width=430, sizing_mode="fixed")
 
     def load(self):
@@ -145,7 +145,7 @@ class DomainStep:
         self.flow_info.objects = [table([{"quantity": k, "value": v} for k, v in est.items()]),
                                   pn.pane.Markdown("_First estimate from e00 ({} cells, expansion {:g}); y+ tools "
                                                    "follow in step 4 (M4)._".format(*c.meshing.edges["e00"][:2]))]
-        self.vertex_box.objects = [self.app.vertex_panel.view()]
+        self.vertex_box.objects = [self.app.vertex_panel.view(compact=True)]
         try:
             self.plots.objects = self.make_plots()
         except Exception as e:  # noqa: BLE001

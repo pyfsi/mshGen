@@ -1,5 +1,6 @@
 '''
-vertexpanel.py: block vertices and block check, shown in steps 1-3
+vertexpanel.py: block vertices and block check; in full in step 3, as a status line
+("Effect on the blocks", view(compact=True)) in steps 1, 2 and 4
 
 - where the vertices come from (mshGen defaults for this geometry / outdated / custom), recompute button
 - mshGen default availability for airfoil, R/c and level
