@@ -337,22 +337,14 @@ class RawData:
         # Get raw coordinates
         coordinates = read_airfoil_file(name, filename)
 
-        # Remove 'corrupted' point
-        if name=="Mrev-v2":
-            self.N_corrupted_point = 38
-            self.corrupted_point = coordinates[self.N_corrupted_point]
-            coordinates = np.delete(coordinates, self.N_corrupted_point, axis=0)
-            self.coordinates = coordinates
-        elif name == "Mrev-v2_aileron":
-            self.N_corrupted_point = int(len(coordinates) / 2)
-            self.corrupted_point = coordinates[self.N_corrupted_point]
-            coordinates = np.delete(coordinates, self.N_corrupted_point, axis=0)
-            self.coordinates = coordinates
-        elif name == "NACA0012" or name == "AP2":
-            self.N_corrupted_point = int(len(coordinates)/2)
-            self.corrupted_point = coordinates[self.N_corrupted_point]
-            coordinates = np.delete(coordinates, self.N_corrupted_point, axis=0)
-            self.coordinates = coordinates
+        # Remove duplicate points: a point identical to the previous one (e.g. the leading edge listed at
+        # the end of the upper and the start of the lower surface in NACA0012 and Mrev-v2_aileron) gives
+        # an ambiguous leading edge index and a zero-length spline segment. Other points are kept.
+        duplicate = np.where(np.all(np.abs(np.diff(coordinates, axis=0)) < 1e-12, axis=1))[0] + 1
+        self.N_corrupted_point = int(duplicate[0]) if len(duplicate) else None
+        self.corrupted_point = coordinates[duplicate[0]] if len(duplicate) else None
+        coordinates = np.delete(coordinates, duplicate, axis=0)
+        self.coordinates = coordinates
 
         # Trailing and leading edge indices
         m = np.argmax(coordinates[:, 0])
@@ -389,7 +381,8 @@ class RawData:
 
         # Plot raw data
         ax.plot(self.coordinates[:, 0], self.coordinates[:, 1], '>', color='k', label='raw airfoil points')
-        ax.plot(self.corrupted_point[0], self.corrupted_point[1], 's', color='red', markersize=6., label='corrupted point')
+        if self.corrupted_point is not None:
+            ax.plot(self.corrupted_point[0], self.corrupted_point[1], 's', color='red', markersize=6., label='removed duplicate point')
         ax.plot(self.coordinates[self.m, 0], self.coordinates[self.m, 1], '*', markersize=15., color='orange', label='trailing edge')
         ax.plot(self.coordinates[self.n, 0], self.coordinates[self.n, 1], '*', markersize=15., color='magenta', label='leading edge')
         ax.plot([self.coordinates[self.m, 0], self.coordinates[self.n, 0]], [self.coordinates[self.m, 1], self.coordinates[self.n, 1]], '--', color='black', label='chord line')

@@ -87,9 +87,8 @@ def default_mesh_scale(name):
 
 def support(name):
     '''Rows (topic, what mshGen does) for the airfoil name.'''
-    removal = {"Mrev-v2": "point index 38 of the file is removed",
-               "Mrev-v2_aileron": "middle point of the file is removed",
-               "NACA0012": "middle point of the file is removed"}.get(name, "none")
+    removal = {"Mrev-v2_aileron": "duplicate leading edge point is removed",
+               "NACA0012": "duplicate leading edge point is removed"}.get(name, "none (duplicate points only)")
     order = "first half of the points is reversed" if name in ("NACA0012", "Mrev-v2_aileron") else "as in the file"
     camber = ("spline through built-in control points" if name in ("Mrev-v2", "FFA_W3_211", "AP2")
               else "straight line from LE to TE")
@@ -115,10 +114,8 @@ class AirfoilData:
         raw = af.RawData(name, filename)
         self.name, self.filename = name, filename
         self.file_points = np.loadtxt(filename)
-        # RawData keeps the point list only for airfoils with a point clean-up (Mrev-v2, NACA0012, ...)
-        pts = getattr(raw, "coordinates", None)
-        self.points = np.asarray(pts if pts is not None else af.read_airfoil_file(name, filename))
-        self.removed = getattr(raw, "corrupted_point", None)
+        self.points = np.asarray(raw.coordinates)
+        self.removed = raw.corrupted_point          # removed duplicate point (None if there was none)
         u = np.linspace(0, 1, n)
         self.upper = np.array(splev(u, raw.tck_upper)).T
         self.lower = np.array(splev(u, raw.tck_lower)).T

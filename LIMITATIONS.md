@@ -15,9 +15,11 @@ code (and, where stated, in a run); "suspected" means read in the code but not r
 3. **Behaviour depends on the airfoil name.** `airfoil_name` switches on hard-coded code in several places:
    - `aero_functions.read_airfoil_file`: the first half of the points is reversed for
      `NACA0012` and `Mrev-v2_aileron`;
-   - `aero_functions.RawData`: a "corrupted" point is removed; for `Mrev-v2` this is point
-     **index 38** of the file, for NACA0012/AP2 the middle point. A different file under one of
-     these names loses a point it should keep. For other names nothing is removed;
+   - *(fixed 2026-11-20)* `aero_functions.RawData` used to remove a "corrupted" point by name:
+     **index 38** for `Mrev-v2` (a valid lower-surface point at x/c = 0.152) and the middle point
+     for NACA0012/AP2/Mrev-v2_aileron (the duplicate leading edge after the reversal above). It now
+     removes only points identical to the previous point, for every airfoil: NACA0012 and
+     Mrev-v2_aileron are unchanged, Mrev-v2 keeps all its points;
    - `aero_functions.RawData`: camber-line control points exist only for Mrev-v2,
      FFA_W3_211 and AP2. Other airfoils get a **straight line from LE to TE**, which can lie
      outside the airfoil for strongly cambered thin sections;
