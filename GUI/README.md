@@ -6,9 +6,9 @@ in `mshGen/cases/<case>/`, which can also be rebuilt without the GUI. The plan a
 
 Status: **M6** (all milestones of the plan). All steps are editable:
 - geometry: airfoil, 2D/3D, COG, planform;
-- domain: R/c, level, far field, flow;
+- domain: R/c, far field;
 - blocks: slices, chordwise divisions, exterior vertices, aileron, patches;
-- meshing: cells and gradings, with sizing helpers (y+, chordwise, wake, spanwise, cell budget) and
+- meshing: level, flow conditions, cells and gradings, with sizing helpers (y+, chordwise, wake, spanwise, cell budget) and
   a 2D mesh preview identical to blockMesh's.
 
 The build step runs the case with a live log and shows the checkMesh summary, y+ measured on the
@@ -97,12 +97,10 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
   stay upstream of the near-wake line (see `../LIMITATIONS.md` item 7).
 
 **2. Domain** (editable)
-- C-grid radius R/c, with the mshGen levels available for it.
+- C-grid radius R/c (the mshGen levels available for it are listed).
 - Far field (`symTip`) position.
-- Flow conditions U and ν: Reynolds number, plus a first estimate of the wall-normal first cell
-  and its y+.
-- Plots: the root plane with the exterior vertices, and the domain seen from above with the
-  planform, slices and patches.
+- Plots: the root plane with the C-domain and the root section, and the domain seen from above
+  with the planform and patches. (The exterior block vertices and the slices are in step 3.)
 
 **3. Blocks** (editable)
 - **Slices**: edit y in the table to move a slice (root and tip are fixed).
@@ -127,6 +125,11 @@ the vertices are edited, shows the same panel in full:
 - Block check: errors for folded blocks, warnings for skewed ones (corners below 10° or above 170°).
 
 **4. Meshing** (editable)
+- **Starting resolution**: mshGen's level (`mesh_level`, e.g. COARSE); only levels mshGen has for
+  this airfoil and R/c are offered. Choosing one loads its default cells and gradings (and the
+  default block vertices, unless they are custom).
+- **Flow conditions** U and ν: Reynolds number, plus a first estimate of the wall-normal first cell
+  and its y+; the helpers below use them.
 - **Helpers**: each computes a proposal, shows the old → new values and the predicted result
   (measured on the block mesh, next to the current values), and is applied with **Apply proposal**.
   The inputs start from the current mesh.

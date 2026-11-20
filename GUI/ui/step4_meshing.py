@@ -1,7 +1,9 @@
 '''
 step4_meshing.py: step 4 of the GUI, meshing (manual mode, M3)
 
-Inputs:  cells and gradings of the edge parameters e00-e10, spanwise cells and grading per layer
+Inputs:  mshGen level of the default settings (mesh_level, the starting resolution), flow conditions (U, nu)
+         for the Reynolds number and y+; cells and gradings of the edge parameters e00-e10, spanwise cells and
+         grading per layer
 Plots:   2D mesh preview of a slice (as blockMesh builds it) coloured by cell size, aspect ratio (slice/3D),
          neighbour size ratio or corner angle; cells along the airfoil surface (length, first cell height);
          wall-normal and wake distributions; spanwise cell size with jumps between layers
@@ -18,7 +20,7 @@ from bokeh.models import ColorBar, ColumnDataSource, HoverTool, LinearColorMappe
 from bokeh.palettes import Viridis256
 from bokeh.plotting import figure
 
-from core import estimate, preview
+from core import airfoils, blocks as blocks_mod, estimate, preview
 from core.case import EDGE_DESCRIPTION, EDGE_NAMES
 from core.estimate import graded_sizes, layer_types
 from ui.common import bfig, bokeh, note, table
@@ -138,6 +140,14 @@ class MeshingStep:
                                               "grading": {"type": "number", "step": 0.1}})
         self.count = pn.pane.Markdown()
         self.jump_msg = pn.Column(sizing_mode="stretch_width")
+        self.level = pn.widgets.Select(name="mshGen default settings level (mesh_level)", options=airfoils.FMC)
+        self.level_info = pn.pane.Markdown()
+        self.U = pn.widgets.FloatInput(name="Free-stream velocity U (m/s)", step=1.0, start=0.0)
+        self.nu = pn.widgets.FloatInput(name="Kinematic viscosity nu (m2/s)", step=1e-6, start=0.0)
+        self.flow_info = pn.Column(sizing_mode="stretch_width")
+        self.level.param.watch(self.on_level, "value")
+        self.U.param.watch(self.on_flow, "value")
+        self.nu.param.watch(self.on_flow, "value")
 
         self.slice_sel = pn.widgets.IntSlider(name="Slice", start=0, end=1, value=0, width=300)
         self.color_by = pn.widgets.Select(name="Colour by", options=list(COLOR_BY), value="cell size (m)", width=300)
@@ -159,6 +169,8 @@ class MeshingStep:
         from ui.helpers import HelpersPanel
         self.helpers = HelpersPanel(self)
         self.inputs = pn.Column(
+            pn.pane.Markdown("### Starting resolution"), self.level, self.level_info,
+            pn.pane.Markdown("### Flow conditions (for y+)"), pn.Row(self.U, self.nu), self.flow_info,
             self.helpers.layout,
             pn.pane.Markdown("### Edges (chordwise, wall-normal, wake)"),
             pn.pane.Markdown("_cells: number of cells; grad1: expansion ratio (last/first cell) on the airfoil side, "
@@ -182,6 +194,7 @@ class MeshingStep:
         return [pn.Row(self.inputs, self.right, sizing_mode="stretch_width")]
 
     def refresh(self, set_range=False):
+        self._fill_setup()
         self._fill_tables()
         self.helpers.refresh()
         self.update_preview(set_range=set_range, force=True)
@@ -192,6 +205,71 @@ class MeshingStep:
         self._fill_tables()
         self.helpers.refresh()
         self.update_preview(force=True)
+
+    def _fill_setup(self):
+        '''Level (options depend on airfoil and R/c) and flow conditions with the first-cell estimate.'''
+        c = self.app.case
+        used, levels, info = airfoils.default_levels(c.airfoil.name, c.domain.mesh_scale)
+        opts = list(levels)
+        if c.domain.mesh_level not in opts:
+            opts.append(c.domain.mesh_level)        # keep the case's level visible (marked as unavailable)
+        self._updating = True
+        try:
+            self.level.options = opts
+            self.level.value = c.domain.mesh_level
+            self.U.value, self.nu.value = float(c.flow.U), float(c.flow.nu)
+        finally:
+            self._updating = False
+        self.level_info.object = ("_mshGen's default cells and gradings for {} ({}). Choosing a level loads its "
+                                  "defaults into the edges below (your edge changes are replaced); the block vertices "
+                                  "follow when the case is saved._").format(c.airfoil.name, info)
+
+    def _fill_flow(self):
+        c = self.app.case
+        est = blocks_mod.first_cell_estimate(c)
+        self.flow_info.objects = [table([{"quantity": k, "value": v} for k, v in est.items()]),
+                                  pn.pane.Markdown("_Estimate with e00 ({} cells, expansion {:g}); the wall y+ "
+                                                   "helper below sets a target._".format(*c.meshing.edges["e00"][:2]))]
+
+    def on_level(self, event):
+        '''New level: load mshGen's default cells and gradings of that level (mshGen, a few seconds).'''
+        if self._updating:
+            return
+        from core.geometry import mshgen_defaults, recompute_vertices
+        c, f, old = self.app.case, self.app.airfoil_file, self.app.case.domain.mesh_level
+        c.domain.mesh_level = event.new
+        self.level.disabled = True
+
+        def job():
+            if c.blocks.vertex_source == "mshgen-defaults":
+                # vertices and edges together: otherwise the recompute on save would reset the edges again
+                recompute_vertices(c, f, reset_edges=True)
+                return "edges and block vertices"
+            c.meshing.edges = mshgen_defaults(c, f)[2]          # custom vertices are kept
+            return "edges (custom block vertices kept)"
+
+        def done(what, error):
+            self.level.disabled = False
+            if error:
+                c.domain.mesh_level = old
+                self.app.notify("error", "No mshGen defaults for level {}: {}".format(event.new, error))
+            else:
+                self.app.notify("success", "mshGen's {} defaults loaded: {}".format(event.new, what))
+            self.app.changed()
+            self.refresh()
+        self.app.run_background(job, done)
+
+    def on_flow(self, event):
+        if self._updating:
+            return
+        c = self.app.case
+        if self.U.value and self.U.value > 0:
+            c.flow.U = float(self.U.value)
+        if self.nu.value and self.nu.value > 0:
+            c.flow.nu = float(self.nu.value)
+        self.app.changed()
+        self._fill_flow()
+        self.helpers.refresh()
 
     def _fill_tables(self):
         c = self.app.case
@@ -221,6 +299,7 @@ class MeshingStep:
             "slice {} (y = {:.4g} m): {:.2f}".format(r["slice"], r["y"], r["ratio"]) for r in jumps), "warning")]
             if jumps else [])
         self.count.object = "**Estimated cells:** {:,}".format(estimate.cell_count(c))
+        self._fill_flow()                           # the first-cell estimate uses e00
 
     # ---------------- edits ---------------- #
     def _changed(self):

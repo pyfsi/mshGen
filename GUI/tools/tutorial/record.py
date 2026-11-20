@@ -320,17 +320,11 @@ def scenario(r, url, login_png):
     b.inject()
     r.shot("Step 2 · C-grid radius", "Radius R of the C-shaped domain in root chords. The domain reaches 2R "
            "downstream (fixed by mshGen).", W_("C-grid radius R / root chord (mesh_scale)"))
-    r.shot("Step 2 · Level", "The level of mshGen's default resolution; only levels mshGen has for this airfoil and "
-           "R/c are offered.", W_("mshGen default settings level (mesh_level)"))
     r.shot("Step 2 · Far field", "Position of the far-field symmetry plane (symTip) beyond the tip.",
            W_("Far field (symTip) at y (m)"))
-    r.do("T.set('Free-stream velocity U (m/s)', 40)", 3)
-    r.shot("Step 2 · Flow conditions", "Velocity U = 40 m/s and viscosity nu: the Reynolds number and a first "
-           "estimate of the wall-normal first cell and its y+ (flat-plate skin friction).",
-           W_("Free-stream velocity U (m/s)"), also=[W_("Kinematic viscosity nu (m2/s)"), HAS("y+ at the first cell centre")])
-    r.shot("Step 2 · Root plane", "The C-domain at the root with the airfoil and the exterior vertices 22-38; "
-           "inlet: C-front, top and bottom; outlet in red.", HAS("Root plane: C-domain"), where="left")
-    r.shot("Step 2 · Domain from above", "Planform, slices and patches (symRoot, symTip, inlet, outlet).",
+    r.shot("Step 2 · Root plane", "The C-domain at the root with the root section; inlet: C-front, top and "
+           "bottom; outlet in red.", HAS("Root plane: C-domain"), where="left")
+    r.shot("Step 2 · Domain from above", "Planform and patches (symRoot, symTip, inlet, outlet).",
            HAS("Domain seen from above"), where="left")
 
     # ---------------- step 3 ---------------- #
@@ -384,6 +378,14 @@ def scenario(r, url, login_png):
     r.chapter("Step 4: Meshing - helpers")
     r.do("T.radio('4. Meshing')", 6)
     b.inject()
+    r.shot("Step 4 · Level", "The level of mshGen's default resolution (starting point); only levels mshGen has "
+           "for this airfoil and R/c are offered. Choosing one loads its default cells and gradings.",
+           W_("mshGen default settings level (mesh_level)"), where="right")
+    r.do("T.set('Free-stream velocity U (m/s)', 40)", 3)
+    r.shot("Step 4 · Flow conditions", "Velocity U = 40 m/s and viscosity nu: the Reynolds number and a first "
+           "estimate of the wall-normal first cell and its y+ (flat-plate skin friction).",
+           W_("Free-stream velocity U (m/s)"), also=[W_("Kinematic viscosity nu (m2/s)"), HAS("y+ at the first cell centre")],
+           where="right")
     r.shot("Step 4 · Helpers", "Compute cells and gradings from target sizes. Each helper shows the old and new "
            "values and the predicted result (measured on the block mesh) before you apply it.",
            CARD("Helpers: cells and gradings from target sizes"), where="right")

@@ -65,9 +65,9 @@ def main():
             geo.params[k].value = v
         print("1 planform:", a.case.wing.stations, "| slices", [round(s, 3) for s in a.case.blocks.slice_locations])
         # 2. flow
-        dom = a.steps[1]
-        a.step.value = dom.title
-        dom.U.value, dom.nu.value = 40.0, 1.5e-5
+        mesh = a.steps[3]
+        a.step.value = mesh.title
+        mesh.U.value, mesh.nu.value = 40.0, 1.5e-5
         print("2 flow: U", a.case.flow.U, "nu", a.case.flow.nu)
         # 3. blocks: split, extra slice; save (recomputes the vertices for the new root chord)
         blk = a.steps[2]
