@@ -79,7 +79,8 @@ class App:
 
         self.template = pn.template.FastListTemplate(
             title="mshGen GUI",
-            sidebar=[self.case_select, pn.Row(self.save_btn, self.revert_btn), self.status, pn.layout.Divider(),
+            sidebar=[self.case_select, pn.Row(self.save_btn, self.revert_btn), self.status,
+                     pn.pane.Markdown("**Blocks**"), self.vertex_panel.side, pn.layout.Divider(),
                      pn.pane.Markdown("**Steps**"), self.step, pn.layout.Divider(),
                      pn.pane.Markdown("**New case**"), self.new_mode, self.new_name, self.new_airfoil,
                      self.example_select, self.create_btn, pn.layout.Divider(), *self.view3d.widgets()],
@@ -161,14 +162,12 @@ class App:
             self.status.object = ""
             return
         problems = c.validate()
-        state = geometry.vertex_state(c, self.airfoil_file)
+        try:
+            self.vertex_panel.refresh(compact=True)        # sidebar: block vertices and block check
+        except Exception as e:  # noqa: BLE001
+            self.vertex_panel.side.objects = [pn.pane.Alert("Block check failed: " + repr(e), alert_type="danger")]
         lines = ["**{}**{}".format(c.name, "  – _unsaved changes_" if self.is_dirty() else ""),
                  "", "Cells (estimate): **{:,}**".format(estimate.cell_count(c)),
-                 "", "Block vertices: " + {"ok": "mshGen defaults", "outdated": "**recomputed on save**",
-                                           "custom": "custom"}[state],
-                 "", "Block check: " + ("not run" if self.block_problems is None else
-                                        "OK" if not self.block_problems else
-                                        "**{} invalid blocks**".format(len(self.block_problems))),
                  "", "Folder: `cases/" + c.name + "`"]
         lines += (["", "Problems:"] + ["- " + p for p in problems]) if problems else ["", "Settings valid"]
         self.status.object = "\n".join(lines)

@@ -1,6 +1,7 @@
 '''
-vertexpanel.py: block vertices and block check; in full in step 3, as a status line
-("Effect on the blocks", view(compact=True)) in steps 1, 2 and 4
+vertexpanel.py: block vertices and block check
+  - sidebar (all steps): status line, details in a card that opens only when something needs attention
+  - step 3 (where the vertices are edited): the full panel
 
 - where the vertices come from (mshGen defaults for this geometry / outdated / custom), recompute button
 - mshGen default availability for airfoil, R/c and level
@@ -12,34 +13,43 @@ import panel as pn
 from core import blockcheck, blocks, geometry
 from ui.common import note
 
+RECOMPUTE = "Recompute block vertices (mshGen defaults)"
+
 
 class VertexPanel:
 
     def __init__(self, app):
         self.app = app
         self._vertex_key = None
-        self.recompute_btn = pn.widgets.Button(name="Recompute block vertices (mshGen defaults)", button_type="warning")
-        self.reset_edges = pn.widgets.Checkbox(name="also reset edge resolution/grading to mshGen defaults")
-        self.recompute_btn.on_click(self.on_recompute)
-        self.layout = pn.Column(sizing_mode="stretch_width")
+        # one button + checkbox per place (a widget can be shown in one place only)
+        self.widgets = {}
+        for where in ("full", "side"):
+            btn = pn.widgets.Button(name=RECOMPUTE, button_type="warning", sizing_mode="stretch_width")
+            chk = pn.widgets.Checkbox(name="also reset edge resolution/grading to mshGen defaults")
+            btn.on_click(lambda e, chk=chk: self.on_recompute(chk.value))
+            self.widgets[where] = (btn, chk)
+        self.layout = pn.Column(sizing_mode="stretch_width")          # step 3
+        self.side = pn.Column(sizing_mode="stretch_width")            # sidebar
+        self.side_card = pn.Card(title="Details", collapsed=True, sizing_mode="stretch_width",
+                                 header_background="#f3f3f3")
+        self._attention = None
 
     def load(self):
-        self._vertex_key = None
+        self._vertex_key, self._attention = None, None
 
-    def view(self, compact=False):
-        '''compact: one status line, the details in a card that opens only when something needs attention
-        (vertices outdated, no mshGen defaults, exterior vertices off the boundary, invalid blocks).'''
-        self.refresh(compact)
+    def view(self):
+        '''The full panel (step 3).'''
+        self.refresh(compact=False)
         return self.layout
 
-    def on_recompute(self, event):
-        c, f, reset = self.app.case, self.app.airfoil_file, self.reset_edges.value
-        self.recompute_btn.disabled = True
-        self.recompute_btn.name = "Recomputing (mshGen, a few seconds) ..."
+    def on_recompute(self, reset):
+        c, f = self.app.case, self.app.airfoil_file
+        for btn, _ in self.widgets.values():
+            btn.disabled, btn.name = True, "Recomputing (mshGen, a few seconds) ..."
 
         def done(result, error):
-            self.recompute_btn.disabled = False
-            self.recompute_btn.name = "Recompute block vertices (mshGen defaults)"
+            for btn, _ in self.widgets.values():
+                btn.disabled, btn.name = False, RECOMPUTE
             if error:
                 self.app.notify("error", "Recompute failed: " + str(error))
             else:
@@ -48,26 +58,28 @@ class VertexPanel:
         self.app.run_background(lambda: geometry.recompute_vertices(c, f, reset_edges=reset), done)
 
     def refresh(self, compact=False):
+        '''compact: the sidebar (status line + details card), otherwise the full panel of step 3.'''
         c, f = self.app.case, self.app.airfoil_file
         if c is None:
+            self.side.objects = []
             return
         self._problems, self._warnings, self._level_error, self._off = None, [], None, []
         state = geometry.vertex_state(c, f)
         key = (state, c.airfoil.name, c.domain.mesh_scale, c.domain.mesh_level)
-        if key != self._vertex_key:     # default of the checkbox; the user's choice is kept otherwise
-            self.reset_edges.value = geometry.edge_defaults_changed(c)
+        if key != self._vertex_key:     # default of the checkboxes; the user's choice is kept otherwise
+            for _, chk in self.widgets.values():
+                chk.value = geometry.edge_defaults_changed(c)
             self._vertex_key = key
+        btn, chk = self.widgets["side" if compact else "full"]
         items = []
         if state == "ok":
             items.append(note("Block vertices are mshGen's defaults for this geometry.", "success"))
         elif state == "outdated":
             items += [note("The geometry, R/c or level changed since the block vertices were computed. They are "
-                           "recomputed (mshGen defaults) when you save the case, or now:", "warning"),
-                      self.recompute_btn, self.reset_edges]
+                           "recomputed (mshGen defaults) when you save the case, or now:", "warning"), btn, chk]
         else:
             items += [note("The block vertices were set by hand (custom) and are not recomputed automatically. "
-                           "To use mshGen's defaults for this geometry:", "info"),
-                      self.recompute_btn, self.reset_edges]
+                           "To use mshGen's defaults for this geometry:", "info"), btn, chk]
         try:
             geometry.check_level(c)
         except ValueError as e:
@@ -81,7 +93,10 @@ class VertexPanel:
                                   "Recompute the vertices or move them in step 3.".format(
                                       ", ".join(map(str, off)), blocks.radius(c)), "danger"))
         items.append(self.block_check_view(state))
-        self.layout.objects = [self.status_line(state), self._details(state, items)] if compact else items
+        if compact:
+            self.side.objects = [self.status_line(state), self._details(state, items)]
+        else:
+            self.layout.objects = items
 
     def status_line(self, state):
         '''One line: where the vertices come from and the result of the block check.'''
@@ -91,9 +106,9 @@ class VertexPanel:
                 "outdated": warn + " vertices: <b>outdated</b>, recomputed on save",
                 "custom": ok + " vertices: custom (step 3)"}[state]
         if self._level_error:
-            vert += " &nbsp; " + bad + " <b>no mshGen defaults</b>"
+            vert += "<br>" + bad + " <b>no mshGen defaults</b>"
         if self._off:
-            vert += " &nbsp; " + bad + " <b>exterior vertices off the boundary</b>"
+            vert += "<br>" + bad + " <b>exterior vertices off the boundary</b>"
         p, w = self._problems, self._warnings
         if p is None:
             check = warn + " block check after the recompute" if state == "outdated" else bad + " block check failed"
@@ -107,9 +122,14 @@ class VertexPanel:
                             sizing_mode="stretch_width")
 
     def _details(self, state, items):
+        '''The details card of the sidebar: kept between refreshes (an opened card stays open while editing);
+        it opens by itself when something starts needing attention and closes when that is resolved.'''
         attention = state == "outdated" or bool(self._level_error or self._off or self._problems)
-        return pn.Card(*items, title="Details", collapsed=not attention, sizing_mode="stretch_width",
-                       header_background="#f3f3f3")
+        self.side_card.objects = items
+        if attention != self._attention:
+            self.side_card.collapsed = not attention
+            self._attention = attention
+        return self.side_card
 
     def block_check_view(self, state):
         if state == "outdated":

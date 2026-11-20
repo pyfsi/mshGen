@@ -92,7 +92,6 @@ class GeometryStep:
         self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs, self.scale_slices,
                                       pn.pane.Markdown("### Derived values"), self.derived)
 
-        self.vertex_box = pn.Column(sizing_mode="stretch_width")
         self.plots = pn.Column(sizing_mode="stretch_width")
 
         self.dim.param.watch(self.on_dim, "value")
@@ -111,7 +110,6 @@ class GeometryStep:
             pn.Card(self.support, title="What mshGen does for this airfoil", collapsed=True),
             pn.pane.Markdown("### Mesh origin (COG)"), pn.Row(self.cog_x, self.cog_z),
             self.planform_box,
-            pn.pane.Markdown("### Effect on the blocks"), self.vertex_box,
             width=430, sizing_mode="fixed")
 
     # ---------------- load case into widgets ---------------- #
@@ -285,7 +283,6 @@ class GeometryStep:
             ", ".join(info.get("examples", [])) or "-")
         self.support.objects = [table([{"topic": t, "mshGen": v} for t, v in airfoils.support(c.airfoil.name)])]
         self.planform_box.visible = c.dim == "3D"
-        self.vertex_box.objects = [self.app.vertex_panel.view(compact=True)]
         if c.dim == "3D":
             try:
                 d = describe(c.wing_stations or [[0, 0, 1.0, 0, 0, 0]])

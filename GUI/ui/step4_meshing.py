@@ -138,7 +138,6 @@ class MeshingStep:
                                               "grading": {"type": "number", "step": 0.1}})
         self.count = pn.pane.Markdown()
         self.jump_msg = pn.Column(sizing_mode="stretch_width")
-        self.vertex_box = pn.Column(sizing_mode="stretch_width")
 
         self.slice_sel = pn.widgets.IntSlider(name="Slice", start=0, end=1, value=0, width=300)
         self.color_by = pn.widgets.Select(name="Colour by", options=list(COLOR_BY), value="cell size (m)", width=300)
@@ -167,7 +166,6 @@ class MeshingStep:
                              "LIMITATIONS.md item 12); e08 only matters beyond the tip and in aileron layers._"),
             self.edges,
             pn.pane.Markdown("### Spanwise layers"), self.layers, self.jump_msg, self.count,
-            pn.pane.Markdown("### Effect on the blocks"), self.vertex_box,
             width=520, sizing_mode="fixed")
         self.right = pn.Column(pn.Row(self.slice_sel, self.color_by), self.zoom,
                                pn.Row(self.auto, self.update_btn), self.preview_msg, self.preview.pane,
@@ -185,7 +183,6 @@ class MeshingStep:
 
     def refresh(self, set_range=False):
         self._fill_tables()
-        self.vertex_box.objects = [self.app.vertex_panel.view(compact=True)]
         self.helpers.refresh()
         self.update_preview(set_range=set_range, force=True)
 
@@ -229,7 +226,6 @@ class MeshingStep:
     def _changed(self):
         self.app.changed()
         self._fill_tables()
-        self.vertex_box.objects = [self.app.vertex_panel.view(compact=True)]
         self.helpers.refresh()
         if self.auto.value:
             self.update_preview(force=True)

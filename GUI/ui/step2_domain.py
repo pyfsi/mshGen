@@ -33,7 +33,6 @@ class DomainStep:
         self.U = pn.widgets.FloatInput(name="Free-stream velocity U (m/s)", step=1.0, start=0.0)
         self.nu = pn.widgets.FloatInput(name="Kinematic viscosity nu (m2/s)", step=1e-6, start=0.0)
         self.flow_info = pn.Column()
-        self.vertex_box = pn.Column(sizing_mode="stretch_width")
         self.plots = pn.Column(sizing_mode="stretch_width")
         self.far_box = pn.Column(pn.pane.Markdown("### Far field"), self.far, self.far_info)
 
@@ -47,7 +46,6 @@ class DomainStep:
             pn.pane.Markdown("### C-grid"), self.scale, self.level, self.scale_info,
             self.far_box,
             pn.pane.Markdown("### Flow conditions"), self.U, self.nu, self.flow_info,
-            pn.pane.Markdown("### Effect on the blocks"), self.vertex_box,
             width=430, sizing_mode="fixed")
 
     def load(self):
@@ -145,7 +143,6 @@ class DomainStep:
         self.flow_info.objects = [table([{"quantity": k, "value": v} for k, v in est.items()]),
                                   pn.pane.Markdown("_First estimate from e00 ({} cells, expansion {:g}); y+ tools "
                                                    "follow in step 4 (M4)._".format(*c.meshing.edges["e00"][:2]))]
-        self.vertex_box.objects = [self.app.vertex_panel.view(compact=True)]
         try:
             self.plots.objects = self.make_plots()
         except Exception as e:  # noqa: BLE001
