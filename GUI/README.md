@@ -59,8 +59,9 @@ The 3D views (step 1 wing, step 5 walls) are Plotly figures that need WebGL in t
 on a remote desktop or in an X session often has no WebGL; Plotly then only says "WebGL is not
 supported by your browser". The GUI checks the browser when the page opens:
 - **with WebGL**: interactive views (drag to rotate, scroll to zoom);
-- **without WebGL**: the same figure is rendered on the server as an image (about 3 s per view),
-  with view buttons (3D, top, front, side) and azimuth / elevation / distance sliders.
+- **without WebGL**: the same surfaces are drawn on the server with matplotlib (3D axes, equal
+  scales, orthographic, about 1–2 s per view), with view buttons (3D, top, front, side) and
+  azimuth / elevation / zoom sliders. The picture is zoomed to fill the frame.
 
 The sidebar switch **3D views: auto / interactive / image** overrides the choice, and so does the
 URL parameter `view3d`, e.g. `/app?case=MegAWES_wing&step=5&view3d=image`. Interactive views are

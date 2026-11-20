@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 from core import airfoils, blockcheck, geometry  # noqa: F401
 from core.planform import COLUMNS, Planform, describe, fit, place, section_params, stations_problems, surface
 from ui.common import COLORS, bfig, bokeh, note, table
-from ui.view3d import View3D
+from ui.view3d import View3D, grid_patch
 
 _AIRFOIL_CACHE = {}
 
@@ -31,11 +31,21 @@ PARAMS = [  # key, label, step
 ]
 
 
-def wing_figure(case, outline):
-    '''Plotly 3D view of the half wing (step 1); also used for the tutorial video (static export).'''
+def wing_surface(case, outline):
+    '''Grid X, Y, Z of the half-wing surface (41 spanwise stations, up to 121 outline points).'''
     st = case.wing_stations or [[0, 0, 1.0, 0, 0, 0]]
     idx = np.linspace(0, len(outline) - 1, min(len(outline), 121)).astype(int)
-    X, Y, Z = surface(st, outline[idx], case.cog, n_span=41)
+    return surface(st, outline[idx], case.cog, n_span=41)
+
+
+def wing_patches(case, outline):
+    '''The half wing as a patch for the matplotlib 3D view.'''
+    return [grid_patch("wing", *wing_surface(case, outline), "#6baed6")]
+
+
+def wing_figure(case, outline):
+    '''Plotly 3D view of the half wing (step 1); also used for the tutorial video (static export).'''
+    X, Y, Z = wing_surface(case, outline)
     fig = go.Figure(go.Surface(x=X, y=Y, z=Z, colorscale=[[0, "#9ecae1"], [1, "#3182bd"]], showscale=False,
                                surfacecolor=Z, lighting=dict(ambient=0.6, diffuse=0.6)))
     fig.update_layout(title="3D view of the half wing (drag to rotate)", height=420,
@@ -354,5 +364,6 @@ class GeometryStep:
         out.append(bokeh(f))
 
         # 3D view
-        out.append(View3D(self.app, wing_figure(c, outline), height=440, slot="geometry", width=760).panel)
+        out.append(View3D(self.app, wing_figure(c, outline), wing_patches(c, outline), height=440, slot="geometry",
+                          width=760, title="3D view of the half wing").panel)
         return out

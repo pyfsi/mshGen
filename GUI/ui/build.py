@@ -152,8 +152,10 @@ class BuildStep:
             elif not result:
                 self.view3d.objects = [pn.pane.Markdown("_No mesh yet: build the mesh._")]
             else:
-                self.view3d.objects = [View3D(self.app, self.figure_3d(result, edges), height=620,
-                                              slot="build").panel]
+                patches = [(n, p, f, WALL_COLORS.get(n, "#888888")) for n, (p, f) in result.items()]
+                self.view3d.objects = [View3D(self.app, self.figure_3d(result, edges), patches, height=620,
+                                              slot="build", title="Wall patches of the built mesh",
+                                              edges=edges).panel]
         self.app.run_background(lambda: wall_surfaces(folder), done)
 
     @staticmethod

@@ -1,36 +1,44 @@
 '''
-view3d.py: 3D views (Plotly) that also work in a browser without WebGL
+view3d.py: 3D views that also work in a browser without WebGL
 
 Plotly 3D plots need WebGL in the browser. Without it (e.g. a browser on a remote desktop or in an X
 session without graphics acceleration) Plotly shows only "WebGL is not supported by your browser".
 A hidden probe (WebGLProbe) asks the browser whether WebGL is available. Each View3D then shows
   - interactive: the Plotly figure (drag to rotate, scroll to zoom), needs WebGL;
-  - image:       the same figure rendered on the server (kaleido) as a PNG, with view presets and
-                 azimuth / elevation / distance sliders to turn it.
+  - image:       a matplotlib 3D plot of the same surfaces, rendered on the server as a PNG, with view
+                 presets and azimuth / elevation / zoom sliders to turn it.
 The sidebar switch "3D views" (auto / interactive / image) overrides the automatic choice.
+
+The surfaces are given as patches: (name, points (N x 3), faces (list of vertex index lists), colour).
 '''
-import hashlib
-import math
+import io
 import threading
-from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import panel as pn
 import param
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
+from matplotlib.transforms import Bbox
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from panel.reactive import ReactiveHTML
 
 MODES = ["auto", "interactive", "image"]
 IMAGE_WIDTH = 1100
 PROBE_TIMEOUT = 6.0          # s: no answer from the probe -> treat as "no WebGL" (images always work)
+LIGHT = np.array([-0.4, -0.5, 1.0]) / np.linalg.norm([-0.4, -0.5, 1.0])
 
-# view presets: azimuth (deg, from +x towards +y), elevation (deg), distance (Plotly eye units)
-PRESETS = {"3D": (-145, 30, 3.6),
-           "Top (x-y)": (0, 90, 2.4),
-           "Front (y-z)": (0, 0, 2.4),
-           "Side (x-z)": (-90, 0, 2.4)}
+# view presets: azimuth (deg, camera direction from +x towards +y), elevation (deg), zoom
+PRESETS = {"3D": (-125, 25, 1.0),
+           "Top (x-y)": (0, 90, 1.0),
+           "Front (y-z)": (0, 0, 1.0),
+           "Side (x-z)": (-90, 0, 1.0)}
 
-_RENDER = ThreadPoolExecutor(max_workers=1)           # kaleido renders, separate from the app's save jobs
-_PNG_CACHE, _PNG_LOCK = OrderedDict(), threading.Lock()
+_RENDER = ThreadPoolExecutor(max_workers=1)           # renders, separate from the app's save jobs
+_MPL_LOCK = threading.Lock()
 
 
 class WebGLProbe(ReactiveHTML):
@@ -48,60 +56,136 @@ class WebGLProbe(ReactiveHTML):
     """}
 
 
-def camera(az, el, dist):
-    '''Plotly scene camera for azimuth/elevation (deg) and distance.'''
-    a, e = math.radians(az), math.radians(el)
-    eye = dict(x=dist * math.cos(e) * math.cos(a), y=dist * math.cos(e) * math.sin(a), z=dist * math.sin(e))
-    if abs(el) > 85:          # looking straight down/up: x (flow) points down the screen, y to the right
-        up = dict(x=-math.cos(a) * math.copysign(1, el), y=-math.sin(a) * math.copysign(1, el), z=0)
-    else:
-        up = dict(x=0, y=0, z=1)
-    return dict(eye=eye, up=up, center=dict(x=0, y=0, z=0))
+def grid_patch(name, X, Y, Z, color):
+    '''Patch of a structured surface (arrays n x m): quads between neighbouring grid points.'''
+    n, m = X.shape
+    pts = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
+    idx = np.arange(n * m).reshape(n, m)
+    faces = np.stack((idx[:-1, :-1], idx[1:, :-1], idx[1:, 1:], idx[:-1, 1:]), axis=-1).reshape(-1, 4)
+    return (name, pts, faces, color)
 
 
-def render_png(fig, az, el, dist, width, height):
-    '''PNG of the Plotly figure seen from (az, el, dist); cached (kaleido needs a few seconds).'''
-    spec = fig.to_json()
-    key = (hashlib.md5(spec.encode()).hexdigest(), az, el, round(dist, 3), width, height)
-    with _PNG_LOCK:
-        if key in _PNG_CACHE:
-            _PNG_CACHE.move_to_end(key)
-            return _PNG_CACHE[key]
-    f = fig.__class__(fig)                     # copy: the interactive figure keeps its own camera
-    f.update_layout(scene_camera=camera(az, el, dist), width=width, height=height)
-    title = f.layout.title.text
-    if title:
-        f.update_layout(title_text=title.replace("(drag to rotate)", "").strip())
-    png = f.to_image(format="png", width=width, height=height)
-    with _PNG_LOCK:
-        _PNG_CACHE[key] = png
-        while len(_PNG_CACHE) > 40:
-            _PNG_CACHE.popitem(last=False)
-    return png
+def _shade(color, normals):
+    '''Face colours: base colour times ambient + diffuse (two-sided) light.'''
+    from matplotlib.colors import to_rgb
+    base = np.array(to_rgb(color))
+    k = 0.5 + 0.5 * np.abs(normals @ LIGHT)
+    return np.clip(base[None, :] * k[:, None], 0, 1)
+
+
+def render_mpl(patches, az, el, zoom, width, height, title="", edges=False, max_edges=60000,
+               labels=("x (m)", "y (m)", "z (m)")):
+    '''PNG of the patches seen from azimuth/elevation (deg), orthographic projection, equal axes.'''
+    polys, colors, legend = [], [], []
+    for name, pts, faces, color in patches:
+        pts = np.asarray(pts, dtype=float)
+        if len(faces) == 0:
+            continue
+        quads = [pts[list(f)] for f in faces]
+        normals = []
+        for q in quads:
+            nrm = np.cross(q[2] - q[0], q[-1] - q[1]) if len(q) > 3 else np.cross(q[1] - q[0], q[2] - q[0])
+            ln = np.linalg.norm(nrm)
+            normals.append(nrm / ln if ln > 0 else nrm)
+        polys += quads
+        colors.append(_shade(color, np.array(normals)))
+        legend.append(Patch(facecolor=color, label=name))
+    allpts = np.vstack(polys) if polys else np.zeros((1, 3))
+    lo, hi = allpts.min(axis=0), allpts.max(axis=0)
+    span = np.maximum(hi - lo, 1e-3 * max(hi - lo))
+
+    with _MPL_LOCK:                           # mplot3d is not thread-safe in all versions
+        fig = Figure(figsize=(width / 100, height / 100), dpi=150)
+        FigureCanvasAgg(fig)
+        ax = fig.add_axes([0, 0, 1, 1], projection="3d")
+        # one collection: matplotlib sorts faces by depth only within a collection
+        draw_edges = edges and sum(len(p) for p in polys) <= max_edges
+        fc = np.vstack(colors) if colors else np.zeros((0, 3))
+        # without cell edges, faces get a thin edge in their own colour (no light seams between faces)
+        coll = Poly3DCollection(polys, facecolors=fc, edgecolors=(0, 0, 0, 0.18) if draw_edges else fc,
+                                linewidths=0.12 if draw_edges else 0.3)
+        coll.set_clip_on(False)               # mplot3d clips to the unzoomed axes box (zoom > 1 cuts the wing)
+        ax.add_collection3d(coll)
+        ax.set_xlim(lo[0], lo[0] + span[0])
+        ax.set_ylim(lo[1], lo[1] + span[1])
+        ax.set_zlim(lo[2], lo[2] + span[2])
+        ax.set_box_aspect(span, zoom=1.0)    # the zoom is applied after the fit (below)
+        ax.set_proj_type("ortho")
+        ax.view_init(elev=el, azim=az)
+        ax.set_xlabel(labels[0])
+        ax.set_ylabel(labels[1])
+        ax.set_zlabel(labels[2])
+        for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+            axis.set_major_locator(MaxNLocator(5))
+        axes = (ax.xaxis, ax.yaxis, ax.zaxis)
+        axes[int(np.argsort(span)[0])].set_major_locator(MaxNLocator(2))      # the thin direction: few ticks
+        a, e = np.radians(az), np.radians(el)
+        view = np.abs([np.cos(e) * np.cos(a), np.cos(e) * np.sin(a), np.sin(e)])
+        if view.max() > 0.97:                 # looking along an axis: its ticks only clutter the picture
+            hidden = axes[int(np.argmax(view))]
+            hidden.set_ticks([])
+            hidden.label.set_visible(False)
+        ax.tick_params(labelsize=8)
+        # A thin wing fills only a strip of the 3D axes: zoom so that the drawing fills the frame (the zoom
+        # slider multiplies this), then crop to the drawing with the title and the legend above it.
+        W_in, H_in = fig.get_size_inches()
+        header = 0.4 if title or len(legend) > 1 else 0.0
+        box = _drawn_box(fig)
+        if box is not None:
+            x0, y0, x1, y1 = box
+            fit = min(0.94 * min(W_in / (x1 - x0), (H_in - header) / (y1 - y0)), 8.0)
+            if abs(fit * zoom - 1) > 0.05:    # zoom > 1: the picture is larger than the frame and cut at its edges
+                ax.set_box_aspect(span, zoom=fit * zoom)
+                ax.set_position([0, 0, 1, 1 - header / H_in])
+                box = _drawn_box(fig)
+        x0, y0, x1, y1 = box if box is not None else (0, 0, W_in, H_in - header)
+        x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, W_in), min(y1, H_in - header)
+        if title:
+            fig.text(x0 / W_in, (y1 + 0.08) / H_in, title, fontsize=11, ha="left", va="bottom")
+        if len(legend) > 1:
+            fig.legend(handles=legend, loc="lower right", bbox_to_anchor=(x1 / W_in, (y1 + 0.02) / H_in),
+                       ncol=len(legend), fontsize=9, frameon=False, handlelength=1.2, columnspacing=1.0)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", bbox_inches=Bbox([[x0, y0], [x1, y1 + header]]))
+    return buf.getvalue()
+
+
+def _drawn_box(fig, pad_px=6):
+    '''(x0, y0, x1, y1) in inches of the non-white part of the drawn figure, None if empty.'''
+    fig.canvas.draw()
+    rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
+    rows, cols = np.where((rgb < 250).any(axis=2))
+    if not len(rows):
+        return None
+    H, dpi = rgb.shape[0], fig.dpi
+    return ((cols.min() - pad_px) / dpi, (H - rows.max() - pad_px) / dpi,
+            (cols.max() + pad_px) / dpi, (H - rows.min() + pad_px) / dpi)
 
 
 class View3D:
-    '''A 3D view of a Plotly figure: interactive (WebGL) or server-rendered image, see the module docstring.'''
+    '''A 3D view: interactive Plotly figure (WebGL) or matplotlib image, see the module docstring.'''
 
-    def __init__(self, app, fig, height=500, slot="main", width=IMAGE_WIDTH):
-        '''slot: one live view per slot (a new view of the same slot replaces the old one);
-        width: pixel width of the server-rendered image (about the width of the column it is shown in).'''
-        self.app, self.fig, self.height, self.width = app, fig, height, width
-        self._shown, self._updating, self._job = None, False, 0
+    def __init__(self, app, fig, patches, height=500, slot="main", width=IMAGE_WIDTH, title="", edges=False):
+        '''fig: Plotly figure (interactive); patches: the same surfaces for the matplotlib image;
+        slot: one live view per slot (a new view of the same slot replaces the old one);
+        width: pixel width of the image (about the width of the column it is shown in).'''
+        self.app, self.fig, self.patches, self.height, self.width = app, fig, patches, height, width
+        self.title, self.edges = title, edges
+        self._shown, self._updating, self._job, self._cache = None, False, 0, {}
         self.preset = pn.widgets.RadioButtonGroup(options=list(PRESETS), value="3D", button_type="light",
                                                   width=420, sizing_mode="fixed")
-        az, el, dist = PRESETS["3D"]
+        az, el, zoom = PRESETS["3D"]
         self.az = pn.widgets.IntSlider(name="Azimuth (deg)", start=-180, end=180, step=5, value=az, width=200)
         self.el = pn.widgets.IntSlider(name="Elevation (deg)", start=-90, end=90, step=5, value=el, width=200)
-        self.dist = pn.widgets.FloatSlider(name="Distance", start=0.6, end=8.0, step=0.1, value=dist, width=200)
+        self.zoom = pn.widgets.FloatSlider(name="Zoom", start=0.5, end=4.0, step=0.1, value=zoom, width=200)
         self.status = pn.pane.Markdown("", styles={"color": "#666"})
         self.image = pn.pane.PNG(None, sizing_mode="scale_width", max_width=width)
         self.controls = pn.Column(
             pn.Row(self.preset, self.status),
-            pn.Row(self.az, self.el, self.dist, sizing_mode="stretch_width"), sizing_mode="stretch_width")
+            pn.Row(self.az, self.el, self.zoom, sizing_mode="stretch_width"), sizing_mode="stretch_width")
         self.panel = pn.Column(sizing_mode="stretch_width", min_height=height)
         self.preset.param.watch(self.on_preset, "value")
-        for w in (self.az, self.el, self.dist):
+        for w in (self.az, self.el, self.zoom):
             w.param.watch(self.on_camera, "value_throttled")
         app.view3d.views[slot] = self
         self.update()
@@ -124,10 +208,10 @@ class View3D:
     def on_preset(self, event):
         if self._updating:
             return
-        az, el, dist = PRESETS[event.new]
+        az, el, zoom = PRESETS[event.new]
         self._updating = True
         try:
-            self.az.value, self.el.value, self.dist.value = az, el, dist
+            self.az.value, self.el.value, self.zoom.value = az, el, zoom
         finally:
             self._updating = False
         self.render()
@@ -139,19 +223,23 @@ class View3D:
     def render(self):
         self._job += 1
         job = self._job
-        az, el, dist = self.az.value, self.el.value, self.dist.value
-        fig, height, width = self.fig, self.height, self.width
-        self.status.object = "_rendering on the server ..._"
+        key = (self.az.value, self.el.value, round(self.zoom.value, 2))
+        if key in self._cache:
+            self.image.object = self._cache[key]
+            return
+        args = (self.patches, *key, self.width, self.height, self.title, self.edges)
+        self.status.object = "_drawing ..._"
 
         def done(png, error):
             if job != self._job:                     # a newer view was requested meanwhile
                 return
             if error:
-                self.status.object = "Cannot render the 3D view: " + repr(error)
+                self.status.object = "Cannot draw the 3D view: " + repr(error)
                 return
+            self._cache[key] = png
             self.image.object = png
-            self.status.object = "_static image (no WebGL in this browser or 3D views set to image)_"
-        self.app.run_background(lambda: render_png(fig, az, el, dist, width, height), done, executor=_RENDER)
+            self.status.object = "_matplotlib image (no WebGL in this browser or 3D views set to image)_"
+        self.app.run_background(lambda: render_mpl(*args), done, executor=_RENDER)
 
 
 class View3DSettings:
@@ -193,7 +281,7 @@ class View3DSettings:
         browser = ("browser has WebGL" if w else "browser has no WebGL" if w is False
                    else "no answer from the browser" if self.timed_out else "checking the browser ...")
         self.info.object = "{}: 3D views are **{}**".format(browser, {
-            "interactive": "interactive (drag to rotate)", "image": "images rendered on the server",
+            "interactive": "interactive (drag to rotate)", "image": "matplotlib images (turn with the sliders)",
             None: "..."}[self.effective()])
 
     def changed(self):
