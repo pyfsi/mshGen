@@ -53,6 +53,19 @@ mshGen/GUI/run_gui.sh            # optional: port, default 5006
 
 Stop it with Ctrl+C.
 
+### 3D views and WebGL
+
+The 3D views (step 1 wing, step 5 walls) are Plotly figures that need WebGL in the browser. A browser
+on a remote desktop or in an X session often has no WebGL; Plotly then only says "WebGL is not
+supported by your browser". The GUI checks the browser when the page opens:
+- **with WebGL**: interactive views (drag to rotate, scroll to zoom);
+- **without WebGL**: the same figure is rendered on the server as an image (about 3 s per view),
+  with view buttons (3D, top, front, side) and azimuth / elevation / distance sliders.
+
+The sidebar switch **3D views: auto / interactive / image** overrides the choice, and so does the
+URL parameter `view3d`, e.g. `/app?case=MegAWES_wing&step=5&view3d=image`. Interactive views are
+nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.force-enabled = true`.
+
 ## In the GUI
 
 **Sidebar**
@@ -73,7 +86,7 @@ Stop it with Ctrl+C.
   - the root section in mesh coordinates;
   - top view with the slices and the near-wake line;
   - front view;
-  - 3D view (drag to rotate);
+  - 3D view (drag to rotate; an image with view controls if the browser has no WebGL);
   - derived values (area, aspect ratio, MAC, ...).
 - **Block vertices** follow the geometry: they are recomputed with mshGen's defaults when the
   root section, COG or airfoil changes, either on Save or with the button. The edge resolution is
@@ -155,7 +168,8 @@ Stop it with Ctrl+C.
   - patches (type, faces);
   - **Fluent zones** (type, faces; `inlet` is written as pressure-outlet, so set velocity-inlet in
     Fluent);
-  - **3D view of the wall patches**, with cell edges (drag to rotate);
+  - **3D view of the wall patches**, with cell edges (drag to rotate, or an image, see
+    [3D views and WebGL](#3d-views-and-webgl));
   - the images.
 
 ## Case folder
@@ -269,7 +283,7 @@ python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
   - `page.js`: widget helpers and pop-ups in the page
 - `docs/`: tutorial video and its chapters
 - `ui/`:
-  - `common.py`, `vertexpanel.py`
+  - `common.py`, `vertexpanel.py`, `view3d.py` (3D views: WebGL probe, server-rendered images)
   - `step1_geometry.py`, `step2_domain.py`, `step3_blocks.py`
   - `step4_meshing.py`, `helpers.py`
   - `build.py` (step 5)

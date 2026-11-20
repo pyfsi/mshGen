@@ -132,9 +132,19 @@ def main():
         assert len([i for i in imgs if not i.startswith("mshgen")]) == 13
         b.show_3d()
         wait()
-        assert type(b.view3d.objects[0]).__name__ == "Plotly", b.view3d.objects
-        traces = b.view3d.objects[0].object.data
-        print("  3D view:", len(traces), "traces:", sorted({t.name for t in traces}))
+        # no browser: the WebGL probe never answers -> server-rendered image (after the probe timeout)
+        v = a.view3d.views["build"]
+        assert a.view3d.effective() == "image", a.view3d.effective()
+        png = v.image.object
+        assert isinstance(png, bytes) and png[:8] == b"\x89PNG\r\n\x1a\n", type(png)
+        v.preset.value = "Top (x-y)"
+        wait()
+        assert v.image.object != png and (v.az.value, v.el.value) == (0, 90)
+        print("  3D view as image: {} kB, top view re-rendered".format(len(png) // 1000))
+        a.view3d.mode.value = "interactive"
+        assert type(v.panel.objects[0]).__name__ == "Plotly", v.panel.objects
+        traces = v.panel.objects[0].object.data
+        print("  3D view interactive:", len(traces), "traces:", sorted({t.name for t in traces}))
         print("OK    full chain through the GUI")
     finally:
         shutil.rmtree(folder, ignore_errors=True)

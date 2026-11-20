@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 from core.results import fluent_zones, measured_yplus, patches, wall_surfaces
 from core.runner import checkmesh_summary, run_allrun
 from ui.common import note, table
+from ui.view3d import View3D
 
 _BUILDING = set()            # case folders being built (shared by all browser sessions)
 _BUILDING_LOCK = threading.Lock()
@@ -151,8 +152,8 @@ class BuildStep:
             elif not result:
                 self.view3d.objects = [pn.pane.Markdown("_No mesh yet: build the mesh._")]
             else:
-                self.view3d.objects = [pn.pane.Plotly(self.figure_3d(result, edges), sizing_mode="stretch_width",
-                                                      height=620)]
+                self.view3d.objects = [View3D(self.app, self.figure_3d(result, edges), height=620,
+                                              slot="build").panel]
         self.app.run_background(lambda: wall_surfaces(folder), done)
 
     @staticmethod

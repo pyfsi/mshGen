@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import panel as pn
@@ -26,6 +27,7 @@ from ui.step1_geometry import GeometryStep  # noqa: E402
 from ui.step2_domain import DomainStep  # noqa: E402
 from ui.step3_blocks import BlocksStep  # noqa: E402
 from ui.vertexpanel import VertexPanel  # noqa: E402
+from ui.view3d import View3DSettings  # noqa: E402
 
 pn.extension("tabulator", "plotly", notifications=True, sizing_mode="stretch_width")
 
@@ -58,6 +60,9 @@ class App:
 
         self._layout_cache = (None, None)
         self._model_cache = (None, None)
+        # Optional URL parameters: /app?case=<name>&step=<1-5>&view3d=<auto|interactive|image>
+        args = pn.state.session_args or {}
+        self.view3d = View3DSettings(self, initial=args.get("view3d", [b"auto"])[0].decode())
         self.vertex_panel = VertexPanel(self)
         self.steps = [GeometryStep(self), DomainStep(self), BlocksStep(self), MeshingStep(self), BuildStep(self)]
         self.step = pn.widgets.RadioBoxGroup(name="Step", options=[s.title for s in self.steps],
@@ -77,10 +82,8 @@ class App:
             sidebar=[self.case_select, pn.Row(self.save_btn, self.revert_btn), self.status, pn.layout.Divider(),
                      pn.pane.Markdown("**Steps**"), self.step, pn.layout.Divider(),
                      pn.pane.Markdown("**New case**"), self.new_mode, self.new_name, self.new_airfoil,
-                     self.example_select, self.create_btn],
+                     self.example_select, self.create_btn, pn.layout.Divider(), *self.view3d.widgets()],
             main=[self.main], accent_base_color="#2c6e9b", header_background="#2c6e9b", sidebar_width=330)
-        # Optional URL parameters: /app?case=<name>&step=<1-5>
-        args = pn.state.session_args or {}
         want_case = args.get("case", [b""])[0].decode()
         want_step = args.get("step", [b""])[0].decode()
         if want_step.isdigit() and 1 <= int(want_step) <= len(self.steps):
@@ -102,11 +105,12 @@ class App:
         else:
             getattr(n, kind)(msg, duration=8000 if kind in ("error", "warning") else 4000)
 
-    def run_background(self, fn, done):
+    def run_background(self, fn, done, executor=None):
         '''Run fn() in a worker thread; done(result, error) is called in this session afterwards.'''
-        self.jobs.append((self.executor.submit(fn), done))
+        self.jobs.append(((executor or self.executor).submit(fn), done))
 
     def poll(self):
+        self.view3d.poll(time.monotonic())
         for job in [j for j in self.jobs if j[0].done()]:
             self.jobs.remove(job)
             fut, done = job

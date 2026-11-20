@@ -217,7 +217,8 @@ def scenario(r, url, login_png):
         r._save(img, 6)
 
     b = r.b
-    b.open(url + "?case=MegAWES_wing&step=1", wait=25)
+    # interactive 3D views: headless Firefox has no WebGL, the Plotly boxes are overlaid with static exports
+    b.open(url + "?case=MegAWES_wing&step=1&view3d=interactive", wait=25)
 
     # ---------------- sidebar ---------------- #
     r.chapter("The window and the sidebar")

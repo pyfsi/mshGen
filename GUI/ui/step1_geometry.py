@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 from core import airfoils, blockcheck, geometry  # noqa: F401
 from core.planform import COLUMNS, Planform, describe, fit, place, section_params, stations_problems, surface
 from ui.common import COLORS, bfig, bokeh, note, table
+from ui.view3d import View3D
 
 _AIRFOIL_CACHE = {}
 
@@ -344,7 +345,7 @@ class GeometryStep:
         out.append(bokeh(f))
 
         # 3D view
-        out.append(pn.pane.Plotly(wing_figure(c, outline), sizing_mode="stretch_width", height=440))
+        out.append(View3D(self.app, wing_figure(c, outline), height=440, slot="geometry", width=760).panel)
 
         d = describe(st)
         out.append(pn.pane.Markdown("**Derived values**"))
