@@ -130,14 +130,25 @@ def render_mpl(patches, az, el, zoom, width, height, title="", edges=False, max_
         # slider multiplies this), then crop to the drawing with the title and the legend above it.
         W_in, H_in = fig.get_size_inches()
         header = 0.4 if title or len(legend) > 1 else 0.0
-        box = _drawn_box(fig)
+        box = _drawn_box(fig, ax)
         if box is not None:
             x0, y0, x1, y1 = box
-            fit = min(0.94 * min(W_in / (x1 - x0), (H_in - header) / (y1 - y0)), 8.0)
-            if abs(fit * zoom - 1) > 0.05:    # zoom > 1: the picture is larger than the frame and cut at its edges
-                ax.set_box_aspect(span, zoom=fit * zoom)
-                ax.set_position([0, 0, 1, 1 - header / H_in])
-                box = _drawn_box(fig)
+            fit = min(0.92 * min(W_in / (x1 - x0), (H_in - header) / (y1 - y0)), 8.0)
+            # the drawing (with its axis labels) is not centred on the axes: shift the axes so that it is
+            ox, oy = 0.5 * (x0 + x1) - 0.5 * W_in, 0.5 * (y0 + y1) - 0.5 * H_in
+            for _ in range(4):
+                z = fit * zoom
+                if abs(z - 1) <= 0.05:
+                    break
+                ax.set_box_aspect(span, zoom=z)
+                ax.set_position([-ox * z / W_in, -oy * z / H_in, 1, 1 - header / H_in])
+                box = _drawn_box(fig, ax)
+                if zoom > 1 or box is None:   # zoom > 1: the picture is larger than the frame and cut at its edges
+                    break
+                bx0, by0, bx1, by1 = box
+                if bx0 > 0.05 and by0 > 0.05 and bx1 < W_in - 0.05 and by1 < H_in - header - 0.05:
+                    break
+                fit *= 0.9                    # still touching the edge: a bit smaller
         x0, y0, x1, y1 = box if box is not None else (0, 0, W_in, H_in - header)
         x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, W_in), min(y1, H_in - header)
         if title:
@@ -150,31 +161,42 @@ def render_mpl(patches, az, el, zoom, width, height, title="", edges=False, max_
     return buf.getvalue()
 
 
-def _drawn_box(fig, pad_px=6):
-    '''(x0, y0, x1, y1) in inches of the non-white part of the drawn figure, None if empty.'''
+def _drawn_box(fig, ax, pad_px=6):
+    '''(x0, y0, x1, y1) in inches of the drawn part of the figure, None if empty: the non-white pixels plus
+    the axis tick labels and axis labels (which can lie outside the canvas after zooming).'''
     fig.canvas.draw()
     rgb = np.asarray(fig.canvas.buffer_rgba())[:, :, :3]
     rows, cols = np.where((rgb < 250).any(axis=2))
     if not len(rows):
         return None
     H, dpi = rgb.shape[0], fig.dpi
-    return ((cols.min() - pad_px) / dpi, (H - rows.max() - pad_px) / dpi,
-            (cols.max() + pad_px) / dpi, (H - rows.min() + pad_px) / dpi)
+    x0, y0, x1, y1 = cols.min(), H - rows.max(), cols.max(), H - rows.min()
+    renderer = fig.canvas.get_renderer()
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        bb = axis.get_tightbbox(renderer)
+        if bb is not None and np.all(np.isfinite(bb.extents)):
+            x0, y0, x1, y1 = min(x0, bb.x0), min(y0, bb.y0), max(x1, bb.x1), max(y1, bb.y1)
+    return ((x0 - pad_px) / dpi, (y0 - pad_px) / dpi, (x1 + pad_px) / dpi, (y1 + pad_px) / dpi)
 
 
 class View3D:
     '''A 3D view: interactive Plotly figure (WebGL) or matplotlib image, see the module docstring.'''
 
-    def __init__(self, app, fig, patches, height=500, slot="main", width=IMAGE_WIDTH, title="", edges=False):
+    def __init__(self, app, fig, patches, height=500, slot="main", width=IMAGE_WIDTH, title="", edges=False,
+                 view=None):
         '''fig: Plotly figure (interactive); patches: the same surfaces for the matplotlib image;
         slot: one live view per slot (a new view of the same slot replaces the old one);
-        width: pixel width of the image (about the width of the column it is shown in).'''
+        width: pixel width of the image (about the width of the column it is shown in);
+        view: (azimuth, elevation) of the "3D" preset, the starting view (default PRESETS["3D"]).'''
         self.app, self.fig, self.patches, self.height, self.width = app, fig, patches, height, width
         self.title, self.edges = title, edges
         self._shown, self._updating, self._job, self._cache = None, False, 0, {}
-        self.preset = pn.widgets.RadioButtonGroup(options=list(PRESETS), value="3D", button_type="light",
+        self.presets = dict(PRESETS)
+        if view is not None:
+            self.presets["3D"] = (view[0], view[1], PRESETS["3D"][2])
+        self.preset = pn.widgets.RadioButtonGroup(options=list(self.presets), value="3D", button_type="light",
                                                   width=420, sizing_mode="fixed")
-        az, el, zoom = PRESETS["3D"]
+        az, el, zoom = self.presets["3D"]
         self.az = pn.widgets.IntSlider(name="Azimuth (deg)", start=-180, end=180, step=5, value=az, width=200)
         self.el = pn.widgets.IntSlider(name="Elevation (deg)", start=-90, end=90, step=5, value=el, width=200)
         self.zoom = pn.widgets.FloatSlider(name="Zoom", start=0.5, end=4.0, step=0.1, value=zoom, width=200)
@@ -208,7 +230,7 @@ class View3D:
     def on_preset(self, event):
         if self._updating:
             return
-        az, el, zoom = PRESETS[event.new]
+        az, el, zoom = self.presets[event.new]
         self._updating = True
         try:
             self.az.value, self.el.value, self.zoom.value = az, el, zoom

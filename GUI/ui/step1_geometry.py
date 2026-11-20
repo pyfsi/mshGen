@@ -18,6 +18,7 @@ from ui.common import COLORS, bfig, bokeh, note, table
 from ui.view3d import View3D, grid_patch
 
 _AIRFOIL_CACHE = {}
+VIEW_3D = (-35, 25)          # starting 3D view (azimuth, elevation in deg) of the half wing
 
 PARAMS = [  # key, label, step
     ("half_span", "Half-span (m)", 0.1),
@@ -29,6 +30,12 @@ PARAMS = [  # key, label, step
     ("twist_tip_deg", "Twist at the tip (deg)", 0.5),
     ("dihedral_deg", "Dihedral outboard (deg, + tip up)", 0.5),
 ]
+
+
+def _eye(az, el, dist=3.6):
+    '''Plotly camera position for azimuth/elevation (deg), as the matplotlib view.'''
+    a, e = np.radians(az), np.radians(el)
+    return dict(x=dist * np.cos(e) * np.cos(a), y=dist * np.cos(e) * np.sin(a), z=dist * np.sin(e))
 
 
 def wing_surface(case, outline):
@@ -51,7 +58,7 @@ def wing_figure(case, outline):
     fig.update_layout(title="3D view of the half wing (drag to rotate)", height=420,
                       margin=dict(l=0, r=0, t=40, b=0),
                       scene=dict(aspectmode="data", xaxis_title="x (m)", yaxis_title="y (m)", zaxis_title="z (m)",
-                                 camera=dict(eye=dict(x=-2.6, y=-1.8, z=1.8))))
+                                 camera=dict(eye=_eye(*VIEW_3D))))
     return fig
 
 
@@ -362,5 +369,5 @@ class GeometryStep:
 
         # 3D view
         out.append(View3D(self.app, wing_figure(c, outline), wing_patches(c, outline), height=440, slot="geometry",
-                          width=760, title="3D view of the half wing").panel)
+                          width=760, title="3D view of the half wing", view=VIEW_3D).panel)
         return out

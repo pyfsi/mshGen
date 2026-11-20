@@ -15,7 +15,7 @@ import panel as pn
 from core import airfoils, blocks
 from core.estimate import layer_types
 from core.planform import place, section_params
-from ui.common import COLORS, bfig, bokeh, note, table
+from ui.common import COLORS, bfig, bokeh, note
 from ui.step1_geometry import airfoil_data
 
 
@@ -140,11 +140,4 @@ class DomainStep:
                    text_align="center", text_font_size="11px", angle=[math.pi / 2, math.pi / 2, 0, 0])
             f.y_range.flipped = True
             out.append(bokeh(f))
-
-        rows = [{"quantity": "x range (m): -R ... 2R (wake length 2R, fixed by mshGen)",
-                 "value": "{:.4g} ... {:.4g}".format(-R, 2 * R)},
-                {"quantity": "z range at the root (m)", "value": "{:.4g} ... {:.4g}".format(dz0 - R, dz0 + R)}]
-        if c.dim == "3D":
-            rows.append({"quantity": "spanwise extent (m)", "value": "0 ... {:.4g}".format(c.blocks.slice_locations[-1])})
-        out.append(table(rows))
         return out
