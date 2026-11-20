@@ -86,8 +86,10 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
   - the root section in mesh coordinates;
   - top view with the slices and the near-wake line;
   - front view;
-  - 3D view (drag to rotate; an image with view controls if the browser has no WebGL);
-  - derived values (area, aspect ratio, MAC, ...).
+  - 3D view (drag to rotate; an image with view controls if the browser has no WebGL).
+- **Derived values** (left, under the planform): span, area, aspect ratio, taper, MAC, sweep, twist.
+- **Effect on the blocks** (left): a status line for the block vertices and the block check; the
+  details open by themselves when the vertices are outdated or a block is invalid.
 - **Block vertices** follow the geometry: they are recomputed with mshGen's defaults when the
   root section, COG or airfoil changes, either on Save or with the button. The edge resolution is
   kept unless the airfoil changed.
@@ -117,7 +119,7 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
   folded blocks; hover a block for its number and corner angles. Edge names e00–e10 are drawn,
   with zoom presets for the whole domain, the airfoil and the trailing edge.
 
-**Block vertices panel** (steps 1–3)
+**Block vertices panel** (steps 2–4 in full; in step 1 as the status line "Effect on the blocks")
 - Where the vertices come from: mshGen defaults, outdated, or custom.
 - Recompute button.
 - Warnings for missing mshGen defaults and for vertices off the outer boundary.

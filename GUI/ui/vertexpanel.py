@@ -25,8 +25,10 @@ class VertexPanel:
     def load(self):
         self._vertex_key = None
 
-    def view(self):
-        self.refresh()
+    def view(self, compact=False):
+        '''compact: one status line, the details in a card that opens only when something needs attention
+        (vertices outdated, no mshGen defaults, exterior vertices off the boundary, invalid blocks).'''
+        self.refresh(compact)
         return self.layout
 
     def on_recompute(self, event):
@@ -44,10 +46,11 @@ class VertexPanel:
             self.app.changed(refresh_step=True)
         self.app.run_background(lambda: geometry.recompute_vertices(c, f, reset_edges=reset), done)
 
-    def refresh(self):
+    def refresh(self, compact=False):
         c, f = self.app.case, self.app.airfoil_file
         if c is None:
             return
+        self._problems, self._warnings, self._level_error, self._off = None, [], None, []
         state = geometry.vertex_state(c, f)
         key = (state, c.airfoil.name, c.domain.mesh_scale, c.domain.mesh_level)
         if key != self._vertex_key:     # default of the checkbox; the user's choice is kept otherwise
@@ -67,15 +70,45 @@ class VertexPanel:
         try:
             geometry.check_level(c)
         except ValueError as e:
+            self._level_error = str(e)
             items.append(note(str(e), "danger"))
         if state != "outdated":
             off = blocks.exterior_problems(c)
+            self._off = off
             if off:
                 items.append(note("Exterior vertices {} are not on the outer boundary for R = {:.4g} m (R/c changed?). "
                                   "Recompute the vertices or move them in step 3.".format(
                                       ", ".join(map(str, off)), blocks.radius(c)), "danger"))
         items.append(self.block_check_view(state))
-        self.layout.objects = items
+        self.layout.objects = [self.status_line(state), self._details(state, items)] if compact else items
+
+    def status_line(self, state):
+        '''One line: where the vertices come from and the result of the block check.'''
+        ok, warn, bad = ("<span style='color:{}'>{}</span>".format(col, sym) for col, sym in
+                         (("#2e7d32", "&#10004;"), ("#e65100", "&#9888;"), ("#c62828", "&#10006;")))
+        vert = {"ok": ok + " vertices: mshGen defaults",
+                "outdated": warn + " vertices: <b>outdated</b>, recomputed on save",
+                "custom": ok + " vertices: custom (step 3)"}[state]
+        if self._level_error:
+            vert += " &nbsp; " + bad + " <b>no mshGen defaults</b>"
+        if self._off:
+            vert += " &nbsp; " + bad + " <b>exterior vertices off the boundary</b>"
+        p, w = self._problems, self._warnings
+        if p is None:
+            check = warn + " block check after the recompute" if state == "outdated" else bad + " block check failed"
+        elif p:
+            check = bad + " <b>{} invalid blocks</b>".format(len(p))
+        elif w:
+            check = warn + " all blocks valid, {} skewed".format(len(w))
+        else:
+            check = ok + " all blocks valid"
+        return pn.pane.HTML("<div style='font-size:14px;line-height:1.5'>" + vert + "<br>" + check + "</div>",
+                            sizing_mode="stretch_width")
+
+    def _details(self, state, items):
+        attention = state == "outdated" or bool(self._level_error or self._off or self._problems)
+        return pn.Card(*items, title="Details", collapsed=not attention, sizing_mode="stretch_width",
+                       header_background="#f3f3f3")
 
     def block_check_view(self, state):
         if state == "outdated":
@@ -89,6 +122,7 @@ class VertexPanel:
         c = self.app.case
         problems, warnings = blockcheck.problems_of(c, lay), blockcheck.warnings_of(c, lay)
         self.app.block_problems = problems
+        self._problems, self._warnings = problems, warnings
 
         def lst(items, n=6):
             return "\n".join("- " + p for p in items[:n]) + ("" if len(items) <= n else "\n- ... ({} more)".format(len(items) - n))

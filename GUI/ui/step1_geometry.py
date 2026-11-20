@@ -78,7 +78,9 @@ class GeometryStep:
         self.planform_tabs = pn.Tabs(
             ("Parameters", pn.Column(*self.params.values(), self.param_msg)),
             ("Table", pn.Column(self.table, pn.Row(self.add_row_btn, self.del_row_btn), self.table_msg)))
-        self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs, self.scale_slices)
+        self.derived = pn.Column(sizing_mode="stretch_width")
+        self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs, self.scale_slices,
+                                      pn.pane.Markdown("### Derived values"), self.derived)
 
         self.vertex_box = pn.Column(sizing_mode="stretch_width")
         self.plots = pn.Column(sizing_mode="stretch_width")
@@ -99,7 +101,7 @@ class GeometryStep:
             pn.Card(self.support, title="What mshGen does for this airfoil", collapsed=True),
             pn.pane.Markdown("### Mesh origin (COG)"), pn.Row(self.cog_x, self.cog_z),
             self.planform_box,
-            pn.pane.Markdown("### Block vertices"), self.vertex_box,
+            pn.pane.Markdown("### Effect on the blocks"), self.vertex_box,
             width=430, sizing_mode="fixed")
 
     # ---------------- load case into widgets ---------------- #
@@ -273,7 +275,14 @@ class GeometryStep:
             ", ".join(info.get("examples", [])) or "-")
         self.support.objects = [table([{"topic": t, "mshGen": v} for t, v in airfoils.support(c.airfoil.name)])]
         self.planform_box.visible = c.dim == "3D"
-        self.vertex_box.objects = [self.app.vertex_panel.view()]
+        self.vertex_box.objects = [self.app.vertex_panel.view(compact=True)]
+        if c.dim == "3D":
+            try:
+                d = describe(c.wing_stations or [[0, 0, 1.0, 0, 0, 0]])
+                self.derived.objects = [table([{"quantity": k, "value": v} for k, v in d.items()],
+                                              sizing_mode="stretch_width")]
+            except Exception as e:  # noqa: BLE001
+                self.derived.objects = [note("Cannot compute the derived values: " + repr(e), "danger")]
         try:
             self.plots.objects = self.make_plots()
         except Exception as e:  # noqa: BLE001
@@ -346,8 +355,4 @@ class GeometryStep:
 
         # 3D view
         out.append(View3D(self.app, wing_figure(c, outline), height=440, slot="geometry", width=760).panel)
-
-        d = describe(st)
-        out.append(pn.pane.Markdown("**Derived values**"))
-        out.append(table([{"quantity": k, "value": v} for k, v in d.items()]))
         return out
