@@ -14,13 +14,15 @@ step3_blocks.py: step 3 of the GUI, the blocks of the domain, in two parts
 Cells and gradings (spanwise per layer, and along the block edges) are set in step 4.
 Edits of vertices make them "custom" (not recomputed automatically; the vertex panel can reset them).
 '''
+import json
+
 import numpy as np
 import pandas as pd
 import panel as pn
 from bokeh.models import ColumnDataSource, HoverTool, PointDrawTool, Range1d
 from bokeh.plotting import figure
 
-from core import blocks
+from core import blockopt, blocks, sizing
 from core.blockcheck import BLOCKS_2D
 from core.estimate import layer_types
 from core.planform import place, section_params
@@ -31,8 +33,13 @@ GROUP_COLOR = {"wake": "#c6dbef", "upper": "#9ecae1", "lower": "#a1d99b", "inter
 STATUS_COLOR = {"skewed": "#fd8d3c", "folded": "#de2d26", "inverted": "#a50f15"}
 SPLINE_COLOR = {"suction": "#08519c", "pressure": "#006d2c", "camber": "#d94801"}
 PLOT_W, PLOT_H = 690, 580
+SUGGEST = "Suggest block vertices"
 FIXED_VERTICES = [0, 13]                    # TE, LE
 NO_STATIONS = [[0, 0, 1.0, 0, 0, 0]]
+
+
+def _case_key(case):
+    return json.dumps(case.to_dict(), sort_keys=True)
 
 
 def block_group(k):
@@ -102,6 +109,8 @@ class BlockPlot:
                              line_color="#333333", line_width=0.7)
         f.add_tools(HoverTool(renderers=[r_blocks], tooltips=[("block", "@block (@group)"), ("status", "@status"),
                                                                ("corner angles", "@angles")]))
+        self.src_prop = ColumnDataSource(dict(xs=[], ys=[]))          # suggested blocks (dashed)
+        f.multi_line("xs", "ys", source=self.src_prop, color="black", line_dash="dashed", line_width=1.6)
         self.src_outer = ColumnDataSource(dict(x=[], z=[]))
         f.line("x", "z", source=self.src_outer, color="black", line_width=1.5)
         self.src_airfoil = ColumnDataSource(dict(x=[], z=[]))
@@ -190,6 +199,14 @@ class BlockPlot:
                       + (" (set by the aileron cut in this slice)" if cut and i in (4, 5, 6) else "")
                       for i in air])
             self.src_ext.data = dict(x=list(xz[22:, 0]), z=list(xz[22:, 1]), id=[str(i) for i in range(22, 39)])
+            prop = getattr(self.step, "proposal", None)
+            if prop:
+                ps = blockopt._Slice(c, a, sl, flow)
+                pz = blockopt.slice_vertices(a, prop["interior_points"], prop["exterior_points"], ps)
+                quads = [BLOCKS_2D[k] + BLOCKS_2D[k][:1] for k in lay["active"][layer]]
+                self.src_prop.data = dict(xs=[list(pz[q, 0]) for q in quads], ys=[list(pz[q, 1]) for q in quads])
+            else:
+                self.src_prop.data = dict(xs=[], ys=[])
             self._prev = {"air": (list(air), np.array(xz[air, 0]), np.array(xz[air, 1])),
                           "ext": (list(range(22, 39)), np.array(xz[22:, 0]), np.array(xz[22:, 1]))}
             self._slice_y, self._slice, self._dz = y, sl, dz
@@ -431,6 +448,23 @@ class BlockingStep:
         self.split = pn.widgets.Checkbox(name="Wing surface as wingUp / wingDown (SPLIT)")
         self.vertex_box = pn.Column(sizing_mode="stretch_width")
 
+        # Suggest block vertices (core/blockopt.py)
+        self.proposal, self._proposal_key = None, None
+        self.opt_move = pn.widgets.Select(name="Move", options=list(blockopt.MOVE), value=list(blockopt.MOVE)[0])
+        self.opt_focus = pn.widgets.Select(name="Priority close to the airfoil", options=list(blockopt.FOCUS),
+                                           value=list(blockopt.FOCUS)[0])
+        self.opt_btn = pn.widgets.Button(name=SUGGEST, button_type="primary", sizing_mode="stretch_width")
+        self.opt_note = pn.pane.Markdown(sizing_mode="stretch_width")
+        self.opt_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, layout="fit_columns",
+                                              sizing_mode="stretch_width", disabled=True, visible=False,
+                                              widths={"quality": 290, "now": 65, "suggested": 100},
+                                              formatters={"quality": {"type": "textarea"}})
+        self.opt_apply = pn.widgets.Button(name="Apply", button_type="success", visible=False)
+        self.opt_discard = pn.widgets.Button(name="Discard", button_type="light", visible=False)
+        self.opt_btn.on_click(self.on_suggest)
+        self.opt_apply.on_click(self.on_apply)
+        self.opt_discard.on_click(lambda e: self.clear_proposal(refresh=True))
+
         # Plots
         self.top = SliceTopView()
         self.plot = BlockPlot(self)
@@ -460,6 +494,13 @@ class BlockingStep:
         self.zoom.param.watch(lambda e: self.plot.set_zoom(e.new), "value")
 
         self.inputs = pn.Column(
+            pn.pane.Markdown("### Suggest block vertices"),
+            pn.pane.Markdown("_Moves the vertices for orthogonal cells, with priority close to the airfoil: grid "
+                             "lines normal to the wall, block corners near 90 deg, smooth expansion, wake line along "
+                             "the flow. Evaluates the blocks, not the cells (about 30 s). Shown dashed in the plot; "
+                             "see docs/block_optimiser.md._"),
+            pn.Row(self.opt_move, self.opt_focus), self.opt_btn, self.opt_note, self.opt_table,
+            pn.Row(self.opt_apply, self.opt_discard),
             pn.pane.Markdown("### Airfoil vertices"),
             pn.pane.Markdown("_Position along the spline of the boundary: 0 = LE, 1 = TE (about x/c), the same in "
                              "every slice. TE (0) and LE (13) are fixed; 14 only places 20 and 21; 16-21 lie "
@@ -486,6 +527,7 @@ class BlockingStep:
         finally:
             self._updating = False
         self._first_view = True
+        self.clear_proposal()
 
     def view(self):
         self.refresh(plot=True, tables=True, set_range=getattr(self, "_first_view", True))
@@ -493,6 +535,9 @@ class BlockingStep:
         return [pn.Row(self.inputs, self.right, sizing_mode="stretch_width")]
 
     def refresh(self, plot=True, tables=True, set_range=False):
+        if self.proposal is not None and self._proposal_key != _case_key(self.app.case):
+            self.clear_proposal()                   # the case changed since the suggestion: outdated
+            self.opt_note.object = "_The case changed: the suggestion was discarded._"
         if tables:
             self._fill_tables()
         self.vertex_box.objects = [self.app.vertex_panel.view()]
@@ -569,3 +614,52 @@ class BlockingStep:
             return
         self.app.case.options.split = bool(self.split.value)
         self._done(tables=False)
+
+    # ---------------- suggest block vertices ---------------- #
+    def clear_proposal(self, refresh=False):
+        self.proposal, self._proposal_key = None, None
+        self.opt_table.visible = self.opt_apply.visible = self.opt_discard.visible = False
+        self.opt_note.object = ""
+        if refresh:
+            self._update_plots()
+
+    def on_suggest(self, event):
+        c, f = self.app.case, self.app.airfoil_file
+        move, focus = self.opt_move.value, self.opt_focus.value
+        key = _case_key(c)
+        self.clear_proposal()
+        self.opt_btn.disabled, self.opt_btn.name = True, "Searching (about 30 s) ..."
+        self.opt_note.object = ""
+
+        def job():
+            a = airfoil_data(c.airfoil.name, f)
+            return blockopt.suggest(c, a, f, move=move, focus=focus)
+
+        def done(result, error):
+            self.opt_btn.disabled, self.opt_btn.name = False, SUGGEST
+            if error:
+                self.opt_note.object = "**No suggestion:** " + str(error)
+                return
+            if key != _case_key(self.app.case):
+                self.opt_note.object = "_The case changed during the search: run it again._"
+                return
+            self.proposal, self._proposal_key = result, key
+            rows = [{"quality": k, "now": "{:.3g}".format(result["before"][k]),
+                     "suggested": "{:.3g}".format(result["after"][k])} for k in result["before"]]
+            self.opt_table.value = pd.DataFrame(rows)
+            self.opt_table.visible = self.opt_apply.visible = self.opt_discard.visible = True
+            self.opt_note.object = ("_Suggested blocks dashed in the plot. Smaller is better everywhere. The block "
+                                    "values are over slices {}; the cell values use the current cells of step 4 "
+                                    "(root and tip slice). {}._".format(
+                                        result["note"].split("slices evaluated: ")[-1], result["note"].split(";")[0]))
+            self._update_plots()
+        self.app.run_background(job, done)
+
+    def on_apply(self, event):
+        if self.proposal is None:
+            return
+        sizing.apply_proposal(self.app.case, {"interior_points": self.proposal["interior_points"],
+                                              "exterior_points": self.proposal["exterior_points"]})
+        self.clear_proposal()
+        self._done("Suggested block vertices applied. The segment lengths changed: check the chordwise cells in "
+                   "step 4.", "success")

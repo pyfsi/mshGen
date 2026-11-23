@@ -122,6 +122,10 @@ gradings are not set here (step 4).
 - **Exterior vertices**: x, z, each on its boundary (top/bottom, C-arc, outlet; 22 is free).
 - Both can be **dragged in the plot** with the point-draw tool: airfoil vertices stay on their
   spline, exterior vertices on their boundary.
+- **Suggest block vertices** moves the vertices for orthogonal cells, with priority close to the
+  airfoil. It judges the block layout (no cells): grid lines normal to the wall, corners near 90°,
+  smooth expansion, wake line along the flow. The suggestion is drawn dashed, with a before/after
+  table; Apply or Discard. Details: [docs/block_optimiser.md](docs/block_optimiser.md).
 - SPLIT: wing surface as wingUp / wingDown.
 - **Top view** with the selected slice in red, and the **block layout** of that slice, exactly as
   mshGen generates it. Colours show valid, skewed and folded blocks; hover a block for its number and
@@ -231,6 +235,13 @@ python GUI/tests/test_m1.py [--openfoam] # with --openfoam about 4 minutes (bloc
 python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
 ```
 
+**test_m7** (`python GUI/tests/test_m7.py [--openfoam]`, with --openfoam about 15 minutes): the block
+optimiser of step 3b on new FFA_W3_211 and NACA0012 wings.
+- Its own vertices equal mshGen's.
+- The suggestion lowers the objective, passes the block check and has fewer cell faces above 40°.
+- With --openfoam, both meshes are built: lower average non-orthogonality, and no failed check other
+  than the aspect ratio.
+
 **test_m6** (`python GUI/tests/test_m6.py [MegAWES|FFA|swept]`, about 15 minutes, needs OpenFOAM):
 - Each mesh is optimised with all variable groups, then built.
 - checkMesh before and after must show the same cells, non-orthogonality and skewness that are not
@@ -288,6 +299,7 @@ python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
   - `geometry.py`: geometry changes, vertex recompute, new wings
   - `blockcheck.py`: inverted, folded and skewed blocks
   - `blocks.py`: slices, airfoil and exterior vertices, domain
+  - `blockopt.py`: block optimiser of step 3b ([docs/block_optimiser.md](docs/block_optimiser.md))
   - `model.py`: mshGen in memory
   - `preview.py`: 2D slice mesh (blockMesh's interpolation), cell metrics
   - `sizing.py`: sizing helpers and predictions
@@ -299,7 +311,7 @@ python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
   - `record.py`: scenario and video assembly
   - `browser.py`: headless Firefox via Marionette
   - `page.js`: widget helpers and pop-ups in the page
-- `docs/`: tutorial video and its chapters
+- `docs/`: tutorial video and its chapters, `block_optimiser.md`
 - `ui/`:
   - `common.py`, `vertexpanel.py`, `view3d.py` (3D views: WebGL probe, server-rendered images)
   - `step1_geometry.py`, `step2_domain.py`, `step3_blocks.py` (3a slicing, 3b blocking)

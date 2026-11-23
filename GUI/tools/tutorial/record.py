@@ -384,6 +384,13 @@ def scenario(r, url, login_png):
     r.wait_for("!!T.find('all blocks valid', 'has')", 60)
     r.shot("Step 3b · Back to the defaults", "The block-vertex panel resets the vertices to mshGen's defaults.",
            HAS("Block vertices are mshGen"), where="right")
+    r.do("T.click('Suggest block vertices')", 2)
+    r.wait_for("!!T.find('Suggested blocks dashed', 'has')", 120)
+    r.shot("Step 3b · Suggest block vertices", "Moves the vertices for orthogonal cells with priority close to the "
+           "airfoil (grid lines normal to the wall, corners near 90 deg). The suggestion is dashed in the plot, "
+           "with a before/after table; <b>Apply</b> or <b>Discard</b>.", BTN("Suggest block vertices"),
+           also=[TYPED("Tabulator", 0), HAS("blocks of layer")], where="right")
+    r.do("T.click('Discard')", 2)
 
     # ---------------- step 4 ---------------- #
     r.chapter("Step 4: Meshing - helpers")
