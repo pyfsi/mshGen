@@ -32,6 +32,9 @@ LIBRARY = {
                      examples=["NACA2420_RIGHT_WING"]),
     "FFA_W3_211": dict(file="FFA_W3_211.txt", description="wind-turbine airfoil, 21 % thick",
                        examples=["FFAW3_AIRFOIL"]),
+    # optional: the AP2 files are not in the repository (.gitignore); listed only where the file exists
+    "AP2": dict(file="AP2_airfoil.txt", description="AP2 wing airfoil",
+                examples=["AP2_WING", "AP2_WING_cut"], optional=True),
 }
 
 # Tabulated default resolution/grading (cmesh_default_parameters.py): scale R/c -> levels.
@@ -42,8 +45,13 @@ DEFAULT_TABLES = {
 }
 
 
+def available(name):
+    '''False for an optional airfoil whose file is not in meshGeneration/airfoils.'''
+    return name in LIBRARY and (not LIBRARY[name].get("optional") or os.path.isfile(library_file(name)))
+
+
 def names():
-    return list(LIBRARY)
+    return [n for n in LIBRARY if available(n)]
 
 
 def has_defaults(name):
@@ -53,7 +61,7 @@ def has_defaults(name):
 
 def names_with_defaults():
     '''Airfoils that can be used for new wings or chosen in step 1 (mshGen's defaults work).'''
-    return [n for n in LIBRARY if has_defaults(n)]
+    return [n for n in LIBRARY if available(n) and has_defaults(n)]
 
 
 def library_file(name):

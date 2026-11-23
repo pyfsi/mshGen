@@ -103,8 +103,9 @@ code (and, where stated, in a run); "suspected" means read in the code but not r
 ## GUI (`GUI/`)
 
 18. **Only mshGen's existing airfoils (decision 17.11.2026).** The GUI offers the airfoil name/file
-    pairs used by the example scripts (`GUI/core/airfoils.py`): Mrev-v2, NACA0012, NACA2420 and
-    FFA_W3_211 for new wings and in step 1; Mrev-v2_aileron only through its example cases. New
+    pairs used by the example scripts (`GUI/core/airfoils.py`): Mrev-v2, NACA0012, NACA2420,
+    FFA_W3_211 and AP2 for new wings and in step 1 (AP2 only where `AP2_airfoil.txt` is present: the
+    AP2 files are not in the repository); Mrev-v2_aileron only through its example cases. New
     airfoil files cannot be added through the GUI yet, because mshGen selects point clean-up, camber
     line, default vertices and default resolution by the airfoil *name* (item 3). Adding an airfoil
     needs, in mshGen: a file in `meshGeneration/airfoils/` (TE → upper → LE → lower → TE, closed TE, no
