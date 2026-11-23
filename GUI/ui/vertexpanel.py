@@ -1,7 +1,7 @@
 '''
 vertexpanel.py: block vertices and block check
   - sidebar (all steps): status line, details in a card that opens only when something needs attention
-  - step 3 (where the vertices are edited): the full panel
+  - step 3b (where the vertices are edited): the full panel
 
 - where the vertices come from (mshGen defaults for this geometry / outdated / custom), recompute button
 - mshGen default availability for airfoil, R/c and level
@@ -28,7 +28,7 @@ class VertexPanel:
             chk = pn.widgets.Checkbox(name="also reset edge resolution/grading to mshGen defaults")
             btn.on_click(lambda e, chk=chk: self.on_recompute(chk.value))
             self.widgets[where] = (btn, chk)
-        self.layout = pn.Column(sizing_mode="stretch_width")          # step 3
+        self.layout = pn.Column(sizing_mode="stretch_width")          # step 3b
         self.side = pn.Column(sizing_mode="stretch_width")            # sidebar
         self.side_card = pn.Card(title="Details", collapsed=True, sizing_mode="stretch_width",
                                  header_background="#f3f3f3")
@@ -38,7 +38,7 @@ class VertexPanel:
         self._vertex_key, self._attention = None, None
 
     def view(self):
-        '''The full panel (step 3).'''
+        '''The full panel (step 3b).'''
         self.refresh(compact=False)
         return self.layout
 
@@ -58,7 +58,7 @@ class VertexPanel:
         self.app.run_background(lambda: geometry.recompute_vertices(c, f, reset_edges=reset), done)
 
     def refresh(self, compact=False):
-        '''compact: the sidebar (status line + details card), otherwise the full panel of step 3.'''
+        '''compact: the sidebar (status line + details card), otherwise the full panel of step 3b.'''
         c, f = self.app.case, self.app.airfoil_file
         if c is None:
             self.side.objects = []
@@ -90,7 +90,7 @@ class VertexPanel:
             self._off = off
             if off:
                 items.append(note("Exterior vertices {} are not on the outer boundary for R = {:.4g} m (R/c changed?). "
-                                  "Recompute the vertices or move them in step 3.".format(
+                                  "Recompute the vertices or move them in step 3b.".format(
                                       ", ".join(map(str, off)), blocks.radius(c)), "danger"))
         items.append(self.block_check_view(state))
         if compact:
@@ -104,7 +104,7 @@ class VertexPanel:
                          (("#2e7d32", "&#10004;"), ("#e65100", "&#9888;"), ("#c62828", "&#10006;")))
         vert = {"ok": ok + " vertices: mshGen defaults",
                 "outdated": warn + " vertices: <b>outdated</b>, recomputed on save",
-                "custom": ok + " vertices: custom (step 3)"}[state]
+                "custom": ok + " vertices: custom (step 3b)"}[state]
         if self._level_error:
             vert += "<br>" + bad + " <b>no mshGen defaults</b>"
         if self._off:

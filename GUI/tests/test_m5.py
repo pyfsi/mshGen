@@ -65,23 +65,25 @@ def main():
             geo.params[k].value = v
         print("1 planform:", a.case.wing.stations, "| slices", [round(s, 3) for s in a.case.blocks.slice_locations])
         # 2. flow
-        mesh = a.steps[3]
+        mesh = a.meshing
         a.step.value = mesh.title
         mesh.U.value, mesh.nu.value = 40.0, 1.5e-5
         print("2 flow: U", a.case.flow.U, "nu", a.case.flow.nu)
         # 3. blocks: split, extra slice; save (recomputes the vertices for the new root chord)
-        blk = a.steps[2]
+        blk = a.blocking
         a.step.value = blk.title
         blk.split.value = True
-        blk.add_y.value = 2.0
-        blk.on_add(None)
+        slc = a.slicing
+        a.step.value = slc.title
+        slc.add_y.value = 2.0
+        slc.on_add(None)
         a.save()
         wait()
         assert not a.is_dirty() and a.block_problems == [], a.block_problems
         print("3 blocks: slices", [round(s, 3) for s in a.case.blocks.slice_locations], "| split", a.case.options.split,
               "| vertices", a.case.blocks.vertex_source)
         # 4. helpers
-        mesh = a.steps[3]
+        mesh = a.meshing
         a.step.value = mesh.title
         H = mesh.helpers
         H.yplus.value, H.wall_mode.value = 30.0, "limit growth ratio"
@@ -103,7 +105,7 @@ def main():
         pred = sizing.predict(c, a.airfoil_file)
         print("4 helpers: predicted", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in pred.items()})
         # 5. build with Fluent and images
-        b = a.steps[4]
+        b = a.build
         a.step.value = b.title
         b.images_chk.value = True
         b.fluent_chk.value = True

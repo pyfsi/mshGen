@@ -1,11 +1,16 @@
 '''
-step3_blocks.py: step 3 of the GUI, blocks of the domain
+step3_blocks.py: step 3 of the GUI, the blocks of the domain, in two parts
 
-Inputs:  slices (add at a cell face / move / delete / suggest), chordwise divisions of the airfoil,
-         all airfoil vertices (advanced), exterior vertices (table, or drag them in the plot),
-         aileron cut-out layers, patches (SPLIT, ARTIFICIOUS)
-Plot:    block layout of a selected slice as mshGen generates it: blocks coloured by status (valid / skewed /
-         folded), block numbers and hover info, edge names e00-e10, airfoil, vertices; zoom presets
+3a. Spanwise slicing (SlicingStep)
+    Inputs: slices (add at a cell face / move / delete / suggest), scale the slices with the span,
+            per-layer options: aileron cut-out layers, first wing layers as patch 'extra' (ARTIFICIOUS)
+    Plot:   top view of the half wing with the slices and the aileron layers
+3b. Airfoil blocking (BlockingStep)
+    Inputs: chordwise divisions of the airfoil, all airfoil vertices (advanced), exterior vertices (table, or
+            drag them in the plot), wing surface as wingUp / wingDown (SPLIT); block vertices panel
+    Plot:   block layout of a selected slice as mshGen generates it: blocks coloured by status (valid / skewed /
+            folded), block numbers and hover info, edge names e00-e10, airfoil, vertices; zoom presets
+Cells and gradings (spanwise per layer, and of the edges e00-e10) are set in step 4.
 Edits of vertices make them "custom" (not recomputed automatically; the vertex panel can reset them).
 '''
 import numpy as np
@@ -19,7 +24,7 @@ from core.blockcheck import BLOCKS_2D
 from core.estimate import layer_types
 from core.planform import place, section_params
 from ui.common import note
-from ui.step1_geometry import airfoil_data
+from ui.step1_geometry import airfoil_data, top_view
 
 GROUP_COLOR = {"wake": "#c6dbef", "upper": "#9ecae1", "lower": "#a1d99b", "interior": "#fdd0a2"}
 STATUS_COLOR = {"skewed": "#fd8d3c", "folded": "#de2d26", "inverted": "#a50f15"}
@@ -178,26 +183,169 @@ class BlockPlot:
         self.step.refresh(plot=True, tables=True)
 
 
-class BlocksStep:
-    title = "3. Blocks"
+class SlicingStep:
+    title = "3a. Spanwise slicing"
+
+    def __init__(self, app):
+        self.app = app
+        self._updating = False
+        self.slices = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, height=260, selectable="checkbox",
+                                           layout="fit_data_stretch", sizing_mode="stretch_width",
+                                           editors=editors_readonly(["slice", "layer above"]))
+        self.add_y = pn.widgets.FloatInput(name="New slice near y (m)", step=0.1, width=180)
+        self.add_btn = pn.widgets.Button(name="Add slice", button_type="light", align="end")
+        self.del_btn = pn.widgets.Button(name="Delete selected", button_type="light", align="end")
+        self.suggest_btn = pn.widgets.Button(name="Suggest slices", button_type="light", align="end")
+        self.scale_slices = pn.widgets.Checkbox(name="Scale the slices when the span changes", value=True)
+        self.slice_msg = pn.pane.Markdown(
+            "_Slices are the planes along the span where the block vertices are placed: root, planform kinks, "
+            "around the tip, tip, far field. Edit y in the table to move a slice (root and tip are fixed). A new "
+            "slice is placed at a cell face of the current spanwise mesh. The spanwise cells and grading of each "
+            "layer are set in step 4._")
+        self.aileron = pn.widgets.MultiChoice(name="Aileron cut-out in layers (consecutive)", options=[])
+        self.artificious = pn.widgets.Checkbox(name="First wing layers as separate patch 'extra' (ARTIFICIOUS)")
+        self.skip = pn.widgets.IntInput(name="Layers in 'extra'", start=1, step=1, width=150)
+        self.dim_msg = pn.pane.Markdown()
+        self.plots = pn.Column(sizing_mode="stretch_width")
+
+        self.slices.on_edit(self.on_slice_edit)
+        self.add_btn.on_click(self.on_add)
+        self.del_btn.on_click(self.on_delete)
+        self.suggest_btn.on_click(self.on_suggest)
+        self.aileron.param.watch(self.on_aileron, "value")
+        for w in (self.artificious, self.skip):
+            w.param.watch(self.on_patches, "value")
+
+        self.inputs = pn.Column(
+            self.dim_msg,
+            pn.pane.Markdown("### Slices"), self.slices,
+            pn.Row(self.add_y, self.add_btn, self.del_btn), self.suggest_btn, self.scale_slices, self.slice_msg,
+            pn.pane.Markdown("### Layers: aileron cut-out and patches"), self.aileron,
+            pn.pane.Markdown("_Aileron cut position along the chord: fixed by mshGen per wing name (MegAWES: 70 % "
+                             "chord on the suction side, cut normal tilted 20 deg); see LIMITATIONS.md item 4._"),
+            pn.Row(self.artificious, self.skip),
+            width=470, sizing_mode="fixed")
+
+    def load(self):
+        pass
+
+    def view(self):
+        self.refresh()
+        return [pn.Row(self.inputs, self.plots, sizing_mode="stretch_width")]
+
+    def refresh(self, plot=True, tables=True, set_range=False):
+        c = self.app.case
+        if tables:
+            self._fill_tables()
+        three_d = c.dim == "3D"
+        for w in (self.add_btn, self.del_btn, self.suggest_btn, self.add_y):
+            w.disabled = not three_d
+        self.dim_msg.object = "" if three_d else "_2D case: one layer, no spanwise slicing._"
+        if plot:
+            try:
+                self.plots.objects = [top_view(c, slices=True)] if three_d and c.wing_stations else []
+            except Exception as e:  # noqa: BLE001
+                self.plots.objects = [note("Cannot draw the top view: " + repr(e), "danger")]
+
+    def _fill_tables(self):
+        c = self.app.case
+        types = layer_types(c)
+        tip = blocks.tip_slice(c)
+        s = c.blocks.slice_locations
+        rows = []
+        for k, y in enumerate(s):
+            role = "root" if k == 0 else "tip" if k == tip else "far field" if k == len(s) - 1 else ""
+            rows.append({"slice": "{}{}".format(k, " (" + role + ")" if role else ""), "y": y,
+                         "layer above": types[k] if k < len(types) else ""})
+        wing_layers = [k for k, t in enumerate(types) if t != "flow"]
+        self._updating = True
+        try:
+            self.slices.value = pd.DataFrame(rows)
+            self.slices.selection = []
+            self.aileron.options = ["layer {}".format(k) for k in wing_layers]
+            self.aileron.value = ["layer {}".format(k) for k in (c.options.aileron_layers or []) if k in wing_layers]
+            self.artificious.value = bool(c.options.artificious)
+            self.skip.value = int(c.options.skip_layer)
+            self.skip.disabled = not c.options.artificious
+        finally:
+            self._updating = False
+
+    def _done(self, msg=None, kind="info", tables=True):
+        if msg:
+            self.app.notify(kind, msg)
+        self.app.changed()
+        self.refresh(plot=True, tables=tables)
+
+    def on_slice_edit(self, event):
+        if self._updating:
+            return
+        try:
+            blocks.set_slice(self.app.case, int(event.row), float(event.value))
+        except (ValueError, TypeError) as e:
+            self._done(str(e), "warning")
+            return
+        self._done()
+
+    def on_add(self, event):
+        if self.add_y.value is None:
+            return
+        try:
+            y = blocks.add_slice(self.app.case, float(self.add_y.value))
+        except ValueError as e:
+            self.app.notify("warning", str(e))
+            return
+        self._done("Slice added at y = {:.6g} m (at a cell face of the spanwise mesh)".format(y), "success")
+
+    def on_delete(self, event):
+        sel = sorted(self.slices.selection, reverse=True)
+        if not sel:
+            self.app.notify("info", "Select slices with the checkboxes first")
+            return
+        try:
+            for i in sel:
+                blocks.remove_slice(self.app.case, int(i))
+        except ValueError as e:
+            self._done(str(e), "warning")
+            return
+        self._done("Removed {} slice(s); the layers were merged".format(len(sel)), "success")
+
+    def on_suggest(self, event):
+        try:
+            s = blocks.suggest_slices(self.app.case)
+        except ValueError as e:
+            self.app.notify("warning", str(e))
+            return
+        self._done("Suggested slices: " + ", ".join("{:.4g}".format(y) for y in s)
+                   + " (spanwise cells: a first guess, see step 4)", "success")
+
+    def on_aileron(self, event):
+        if self._updating:
+            return
+        layers = sorted(int(v.split()[1]) for v in event.new)
+        if layers and layers != list(range(layers[0], layers[-1] + 1)):
+            self._done("Aileron layers must be consecutive", "warning")
+            return
+        self.app.case.options.aileron_layers = layers or None
+        self._done()
+
+    def on_patches(self, event):
+        if self._updating:
+            return
+        o = self.app.case.options
+        o.artificious = bool(self.artificious.value)
+        o.skip_layer = int(self.skip.value or 1)
+        self.skip.disabled = not o.artificious
+        self._done(tables=False)
+
+
+class BlockingStep:
+    title = "3b. Airfoil blocking"
 
     def __init__(self, app):
         self.app = app
         self._updating = False
 
-        # Slices
-        self.slices = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, height=230, selectable="checkbox",
-                                           layout="fit_data_stretch", sizing_mode="stretch_width",
-                                           editors=editors_readonly(["slice", "layer above", "cells", "grading"]))
-        self.add_y = pn.widgets.FloatInput(name="New slice near y (m)", step=0.1, width=180)
-        self.add_btn = pn.widgets.Button(name="Add slice", button_type="light", align="end")
-        self.del_btn = pn.widgets.Button(name="Delete selected", button_type="light", align="end")
-        self.suggest_btn = pn.widgets.Button(name="Suggest slices", button_type="light", align="end")
-        self.slice_msg = pn.pane.Markdown(
-            "_Edit y in the table to move a slice (root and tip are fixed). New slices are placed at the nearest "
-            "cell face, so the cells do not change. Spanwise cells and grading: step 4._")
-
-        # Chordwise divisions
+        # Chordwise divisions and vertices
         self.div_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, layout="fit_data_stretch",
                                               sizing_mode="stretch_width", editors=editors_readonly(["division"]))
         self.link = pn.widgets.Checkbox(name="same position on both sides", value=True)
@@ -207,13 +355,7 @@ class BlocksStep:
         self.ext_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, height=300,
                                               layout="fit_data_stretch", sizing_mode="stretch_width",
                                               editors=editors_readonly(["vertex", "boundary"]))
-
-        # Cut-outs and patches
-        self.aileron = pn.widgets.MultiChoice(name="Aileron cut-out in layers (consecutive)", options=[])
         self.split = pn.widgets.Checkbox(name="Wing surface as wingUp / wingDown (SPLIT)")
-        self.artificious = pn.widgets.Checkbox(name="First wing layers as separate patch 'extra' (ARTIFICIOUS)")
-        self.skip = pn.widgets.IntInput(name="Layers in 'extra'", start=1, step=1, width=150)
-
         self.vertex_box = pn.Column(sizing_mode="stretch_width")
 
         # Plot
@@ -230,22 +372,14 @@ class BlocksStep:
             + "<br><small>Drag the purple exterior vertices with the point-draw tool (toolbar); they stay on their "
               "boundary. Hover a block for its number and corner angles.</small>")
 
-        self.slices.on_edit(self.on_slice_edit)
-        self.add_btn.on_click(self.on_add)
-        self.del_btn.on_click(self.on_delete)
-        self.suggest_btn.on_click(self.on_suggest)
         self.div_table.on_edit(self.on_div_edit)
         self.vert_table.on_edit(self.on_vert_edit)
         self.ext_table.on_edit(self.on_ext_edit)
-        self.aileron.param.watch(self.on_aileron, "value")
-        for w in (self.split, self.artificious, self.skip):
-            w.param.watch(self.on_patches, "value")
+        self.split.param.watch(self.on_split, "value")
         self.slice_sel.param.watch(lambda e: self.on_slice_sel(), "value")
         self.zoom.param.watch(lambda e: self.plot.set_zoom(e.new), "value")
 
         self.inputs = pn.Column(
-            pn.pane.Markdown("### Slices"), self.slices,
-            pn.Row(self.add_y, self.add_btn, self.del_btn), self.suggest_btn, self.slice_msg,
             pn.pane.Markdown("### Chordwise divisions of the airfoil"),
             pn.pane.Markdown("_Positions along the splines (0 = LE, 1 = TE, about x/c). They split the airfoil "
                              "surface into the edges e03 (TE) ... e07 (LE)._"),
@@ -254,10 +388,7 @@ class BlocksStep:
             pn.Card(pn.pane.Markdown("_x, z in the root plane (m, origin = COG; other slices add dz). Vertices "
                                      "on the outer boundary stay on it._"), self.ext_table,
                     title="Exterior vertices (table)", collapsed=True),
-            pn.pane.Markdown("### Cut-outs and patches"), self.aileron,
-            pn.pane.Markdown("_Aileron cut position: fixed by mshGen per wing name (MegAWES: 70 % chord on the "
-                             "suction side, cut normal tilted 20 deg); see LIMITATIONS.md item 4._"),
-            self.split, pn.Row(self.artificious, self.skip),
+            pn.pane.Markdown("### Wing surface patches"), self.split,
             pn.pane.Markdown("### Block vertices"), self.vertex_box,
             width=470, sizing_mode="fixed")
         self.right = pn.Column(self.slice_sel, self.zoom, self.plot_msg, self.plot.pane, legend,
@@ -281,7 +412,6 @@ class BlocksStep:
         return [pn.Row(self.inputs, self.right, sizing_mode="stretch_width")]
 
     def refresh(self, plot=True, tables=True, set_range=False):
-        c = self.app.case
         if tables:
             self._fill_tables()
         self.vertex_box.objects = [self.app.vertex_panel.view()]
@@ -291,28 +421,12 @@ class BlocksStep:
                 self.plot_msg.object = ""
             except Exception as e:  # noqa: BLE001
                 self.plot_msg.object = "**Cannot draw the blocks:** " + repr(e)
-        self.suggest_btn.disabled = c.dim != "3D"
-        self.add_btn.disabled = self.del_btn.disabled = c.dim != "3D"
 
     def _fill_tables(self):
         c = self.app.case
-        types = layer_types(c)
-        tip = blocks.tip_slice(c)
         s = c.blocks.slice_locations
-        rows = []
-        for k, y in enumerate(s):
-            role = "root" if k == 0 else "tip" if k == tip else "far field" if k == len(s) - 1 else ""
-            rows.append({"slice": "{}{}".format(k, " (" + role + ")" if role else ""), "y": y,
-                         "layer above": types[k] if k < len(types) else "",
-                         "cells": c.meshing.layer_resolution[k] if k < len(types) else None,
-                         "grading": c.meshing.layer_grading[k] if k < len(types) else None})
-        wing_layers = [k for k, t in enumerate(types) if t != "flow"]
         self._updating = True
         try:
-            df = pd.DataFrame(rows)
-            df["cells"] = df["cells"].astype("Int64")
-            self.slices.value = df
-            self.slices.selection = []
             self.div_table.value = pd.DataFrame(blocks.divisions(c))
             roles = {0: "TE", 13: "LE", 16: "", 2: "camber (division 1)", 5: "camber (division 2)",
                      8: "camber (division 3)", 12: "camber, nose", 14: "camber helper", 15: "camber helper"}
@@ -321,11 +435,7 @@ class BlocksStep:
                                                   for i, (p, sp) in enumerate(c.blocks.interior_points)])
             self.ext_table.value = pd.DataFrame([{"vertex": vid, "boundary": blocks.EXTERIOR_KIND[vid], "x": x, "z": z}
                                                  for vid, (x, z) in zip(range(22, 39), c.blocks.exterior_points)])
-            self.aileron.options = ["layer {}".format(k) for k in wing_layers]
-            self.aileron.value = ["layer {}".format(k) for k in (c.options.aileron_layers or []) if k in wing_layers]
-            self.split.value, self.artificious.value = bool(c.options.split), bool(c.options.artificious)
-            self.skip.value = int(c.options.skip_layer)
-            self.skip.disabled = not c.options.artificious
+            self.split.value = bool(c.options.split)
             self.slice_sel.end = max(1, len(s) - 1)
             self.slice_sel.value = min(self.slice_sel.value, len(s) - 1)
         finally:
@@ -336,50 +446,6 @@ class BlocksStep:
             self.app.notify(kind, msg)
         self.app.changed()
         self.refresh(plot=True, tables=tables)
-
-    # ---------------- slices ---------------- #
-    def on_slice_edit(self, event):
-        if self._updating:
-            return
-        c = self.app.case
-        try:
-            blocks.set_slice(c, int(event.row), float(event.value))
-        except (ValueError, TypeError) as e:
-            self._done(str(e), "warning")
-            return
-        self._done()
-
-    def on_add(self, event):
-        if self.add_y.value is None:
-            return
-        try:
-            y = blocks.add_slice(self.app.case, float(self.add_y.value))
-        except ValueError as e:
-            self.app.notify("warning", str(e))
-            return
-        self._done("Slice added at y = {:.6g} m (nearest cell face: the cells did not change)".format(y), "success")
-
-    def on_delete(self, event):
-        sel = sorted(self.slices.selection, reverse=True)
-        if not sel:
-            self.app.notify("info", "Select slices with the checkboxes first")
-            return
-        try:
-            for i in sel:
-                blocks.remove_slice(self.app.case, int(i))
-        except ValueError as e:
-            self._done(str(e), "warning")
-            return
-        self._done("Removed {} slice(s); the layers were merged".format(len(sel)), "success")
-
-    def on_suggest(self, event):
-        try:
-            s = blocks.suggest_slices(self.app.case)
-        except ValueError as e:
-            self.app.notify("warning", str(e))
-            return
-        self._done("Suggested slices: " + ", ".join("{:.4g}".format(y) for y in s) + " (cells: first guess, see step 4)",
-                   "success")
 
     def on_slice_sel(self):
         if self._updating:
@@ -423,28 +489,14 @@ class BlocksStep:
         row = int(event.row)
         df = self.ext_table.value
         try:
-            x, z = blocks.move_exterior(self.app.case, 22 + row, float(df.iloc[row]["x"]), float(df.iloc[row]["z"]))
+            blocks.move_exterior(self.app.case, 22 + row, float(df.iloc[row]["x"]), float(df.iloc[row]["z"]))
         except (ValueError, TypeError) as e:
             self._done("Not applied: " + str(e), "warning")
             return
         self._done()
 
-    # ---------------- options ---------------- #
-    def on_aileron(self, event):
+    def on_split(self, event):
         if self._updating:
             return
-        layers = sorted(int(v.split()[1]) for v in event.new)
-        if layers and layers != list(range(layers[0], layers[-1] + 1)):
-            self._done("Aileron layers must be consecutive", "warning")
-            return
-        self.app.case.options.aileron_layers = layers or None
-        self._done()
-
-    def on_patches(self, event):
-        if self._updating:
-            return
-        o = self.app.case.options
-        o.split, o.artificious = bool(self.split.value), bool(self.artificious.value)
-        o.skip_layer = int(self.skip.value or 1)
-        self.skip.disabled = not o.artificious
+        self.app.case.options.split = bool(self.split.value)
         self._done(tables=False)

@@ -192,9 +192,10 @@ def scenario(r, url, login_png):
         "a new wing case, from the geometry to a checked OpenFOAM and Fluent mesh.",
         "",
         "  1. Geometry      airfoil, planform, mesh origin",
-        "  2. Domain        size of the C-grid, far field, flow conditions",
-        "  3. Blocks        slices, chordwise divisions, exterior vertices",
-        "  4. Meshing       cells and gradings, sizing helpers, quality optimiser",
+        "  2. Domain        size of the C-grid, far field",
+        "  3a. Slicing      slices along the span, aileron and patch layers",
+        "  3b. Blocking     chordwise divisions, vertices, block layout",
+        "  4. Meshing       level, flow, cells and gradings, helpers, optimiser",
         "  5. Build & check blockMesh, checkMesh, y+, Fluent export, images"],
         seconds=12, sub="Structured C-grid meshes of wings with mshGen and blockMesh")
     r.card("Start the GUI", [
@@ -284,9 +285,9 @@ def scenario(r, url, login_png):
     r.shot("Step 1 · A new planform", "Half-span 6 m, chords 1.2 / 0.6 m, constant chord up to 1 m, 5 deg sweep, "
            "twist 2 / -1 deg, 3 deg dihedral. Plots and the table follow immediately.",
            TABS("Parameters"), where="right")
-    r.shot("Step 1 · Top view", "The planform with the <b>slices</b> (dashed) and the <b>near-wake line</b>: "
-           "mshGen's exterior vertices are the same in every slice, so every trailing edge must stay upstream "
-           "of it (limits sweep and twist).", HAS("Top view of the half wing"), where="left")
+    r.shot("Step 1 · Top view", "The planform with the <b>near-wake line</b>: mshGen's exterior vertices are the "
+           "same in every slice, so every trailing edge must stay upstream of it (limits sweep and twist).",
+           HAS("Top view of the half wing"), where="left")
     r.shot("Step 1 · Front view", "Height of the leading and trailing edge along the span: dihedral and twist.",
            HAS("Front view"), where="left")
     r.shot("Step 1 · 3D view", "The half wing in 3D: drag to rotate, scroll to zoom.", TYPED("Plotly"),
@@ -298,8 +299,6 @@ def scenario(r, url, login_png):
            "(beta), dx (upstream shift: sweep) and dz (dihedral). <b>Insert row</b> / <b>Delete selected rows</b>. "
            "Values are interpolated linearly between rows.", TABS("Table"), where="right")
     r.do("T.tab('Parameters')", 1)
-    r.shot("Step 1 · Scale the slices", "When the span changes, the slices are scaled with it, so the tip slice "
-           "stays at the tip.", W_("Scale the slices when the span changes"))
     r.shot("Step 1 · Block vertices", "The root chord changed, so mshGen's default block vertices no longer fit: "
            "they are recomputed when you save, or now with the button. Option: also reset the edge resolution "
            "to mshGen's defaults.", HAS("since the block vertices were computed"),
@@ -328,50 +327,59 @@ def scenario(r, url, login_png):
            HAS("Domain seen from above"), where="left")
 
     # ---------------- step 3 ---------------- #
-    r.chapter("Step 3: Blocks")
-    r.do("T.radio('3. Blocks')", 5)
+    r.chapter("Step 3a: Spanwise slicing")
+    r.do("T.radio('3a. Spanwise slicing')", 5)
     b.inject()
-    r.shot("Step 3 · Slices", "Planes along the span where the block vertices are placed: root, planform kinks, "
+    r.shot("Step 3a · Slices", "Planes along the span where the block vertices are placed: root, planform kinks, "
            "around the tip, tip, far field. Edit y in the table to move a slice (root and tip are fixed).",
            TYPED("Tabulator", 0), where="right")
     r.do("T.set('New slice near y (m)', 2.0)", 1)
-    r.shot("Step 3 · Add a slice", "<b>Add slice</b> near y = 2 m: it is placed at the nearest cell face, so the "
-           "cells do not change. <b>Delete selected</b> merges two layers; <b>Suggest slices</b> proposes root, "
+    r.shot("Step 3a · Add a slice", "<b>Add slice</b> near y = 2 m: it is placed at a cell face of the spanwise "
+           "mesh. <b>Delete selected</b> merges two layers; <b>Suggest slices</b> proposes root, "
            "kinks, tip region and far field.", BTN("Add slice"), click=BTN("Add slice"),
            also=[BTN("Delete selected"), BTN("Suggest slices"), W_("New slice near y (m)")])
     r.do("T.click('Add slice')", 4)
-    r.shot("Step 3 · Slice added", "The new slice and its layers (type, cells, grading).", TYPED("Tabulator", 0),
-           where="right")
-    r.shot("Step 3 · Chordwise divisions", "Where the airfoil surface is divided into the edges e03 (TE) ... e07 "
+    r.shot("Step 3a · Slice added", "The new slice and the layers on both sides (wing or flow); their spanwise "
+           "cells and grading are set in step 4.", TYPED("Tabulator", 0), where="right")
+    r.shot("Step 3a · Top view", "The planform with the numbered slices and the near-wake line.",
+           HAS("dashed: slices"), where="left")
+    r.shot("Step 3a · Scale the slices", "When the span changes in step 1, the slices are scaled with it, so the "
+           "tip slice stays at the tip.", W_("Scale the slices when the span changes"))
+    r.shot("Step 3a · Layers", "<b>Aileron cut-out</b> in selected wing layers (shaded in the top view); "
+           "<b>ARTIFICIOUS</b>: the first wing layers as a separate patch.",
+           W_("Aileron cut-out in layers (consecutive)"),
+           also=[W_("First wing layers as separate patch 'extra' (ARTIFICIOUS)")], where="right")
+
+    r.chapter("Step 3b: Airfoil blocking")
+    r.do("T.radio('3b. Airfoil blocking')", 5)
+    b.inject()
+    r.shot("Step 3b · Chordwise divisions", "Where the airfoil surface is divided into the edges e03 (TE) ... e07 "
            "(LE), as positions along the splines (about x/c), on both sides or separately.",
-           TYPED("Tabulator", 1), also=[W_("same position on both sides")], where="right")
-    r.shot("Step 3 · More vertices", "<b>All airfoil vertices</b> (advanced) and the <b>exterior vertices</b> as "
+           TYPED("Tabulator", 0), also=[W_("same position on both sides")], where="right")
+    r.shot("Step 3b · More vertices", "<b>All airfoil vertices</b> (advanced) and the <b>exterior vertices</b> as "
            "tables.", CARD("All airfoil vertices (advanced)"), also=[CARD("Exterior vertices (table)")],
            where="right")
     r.do("T.check('Wing surface as wingUp / wingDown (SPLIT)', true)", 2)
-    r.shot("Step 3 · Cut-outs and patches", "<b>Aileron cut-out</b> in selected layers; <b>SPLIT</b>: wing surface "
-           "as wingUp / wingDown (e.g. for FSI); <b>ARTIFICIOUS</b>: the first wing layers as a separate patch.",
-           W_("Aileron cut-out in layers (consecutive)"),
-           also=[W_("Wing surface as wingUp / wingDown (SPLIT)"),
-                 W_("First wing layers as separate patch 'extra' (ARTIFICIOUS)")], where="right")
-    r.shot("Step 3 · Block layout", "The blocks of a slice exactly as mshGen generates them: wake, upper and "
+    r.shot("Step 3b · Wing surface patches", "<b>SPLIT</b>: the wing surface as wingUp / wingDown (e.g. for FSI).",
+           W_("Wing surface as wingUp / wingDown (SPLIT)"), where="right")
+    r.shot("Step 3b · Block layout", "The blocks of a slice exactly as mshGen generates them: wake, upper and "
            "lower side; skewed blocks orange, folded ones red; edge names e00-e10. Hover a block for its number "
            "and corner angles.", HAS("blocks of layer"), where="left")
     r.do("T.radio('Airfoil')", 3)
-    r.shot("Step 3 · Zoom", "Zoom presets: whole domain, airfoil, trailing edge (or the mouse wheel).",
+    r.shot("Step 3b · Zoom", "Zoom presets: whole domain, airfoil, trailing edge (or the mouse wheel).",
            L_("Airfoil"), where="below")
     r.do("T.set('Slice', 4)", 3)
-    r.shot("Step 3 · Other slices", "The slider selects the slice: at the tip and beyond, the blocks inside the "
+    r.shot("Step 3b · Other slices", "The slider selects the slice: at the tip and beyond, the blocks inside the "
            "airfoil contour fill the space behind the tip.", W_("Slice"), where="below")
     r.do("T.radio('Whole domain')", 2)
     r.do("T.set('Slice', 0)", 3)
     r.do("T.drag(27, -0.4, 0)", 4)
-    r.shot("Step 3 · Drag exterior vertices", "Move the purple exterior vertices with the point-draw tool of the "
+    r.shot("Step 3b · Drag exterior vertices", "Move the purple exterior vertices with the point-draw tool of the "
            "toolbar: they stay on their boundary (here vertex 27 moved along the top). Moved vertices are custom: "
            "they are no longer recomputed automatically.", HAS("blocks of layer"), where="left")
     r.do("T.click('Recompute block vertices (mshGen defaults)')", 3)
     r.wait_for("!!T.find('all blocks valid', 'has')", 60)
-    r.shot("Step 3 · Back to the defaults", "The block-vertex panel resets the vertices to mshGen's defaults.",
+    r.shot("Step 3b · Back to the defaults", "The block-vertex panel resets the vertices to mshGen's defaults.",
            HAS("Block vertices are mshGen"), where="right")
 
     # ---------------- step 4 ---------------- #

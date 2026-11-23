@@ -62,6 +62,44 @@ def wing_figure(case, outline):
     return fig
 
 
+def top_view(case, slices=False):
+    '''Top view of the half wing (span horizontal, flow downwards) with the near-wake line; with slices
+    (step 3a): the slices (numbered) and the aileron cut-out layers.'''
+    c = case
+    st = c.wing_stations or [[0, 0, 1.0, 0, 0, 0]]
+    b2 = c.half_span
+    ys = np.unique(np.r_[np.linspace(0, b2, 101), np.asarray(st)[:, 1]])
+    le = np.array([place(np.array([[0.0, 0.0]]), *section_params(st, y), c.cog) for y in ys])[:, :, 0]
+    te = np.array([place(np.array([[1.0, 0.0]]), *section_params(st, y), c.cog) for y in ys])[:, :, 0]
+    title = "Top view of the half wing (flow downwards" + (", dashed: slices)" if slices else ")")
+    f = bfig(title, "y (m)", "x (m)", height=360, hover=[("y", "$x{0.000}"), ("x", "$y{0.000}")])
+    xr = (float(min(le[:, 0].min(), te[:, 0].min())), float(max(le[:, 0].max(), te[:, 0].max())))
+    pad = 0.15 * (xr[1] - xr[0] + 1e-9)
+    if slices:
+        s = c.blocks.slice_locations
+        for k in (c.options.aileron_layers or []):
+            if k + 1 < len(s):
+                f.quad(left=s[k], right=s[k + 1], top=xr[0] - pad, bottom=xr[1] + pad, fill_color="#fdae6b",
+                       fill_alpha=0.35, line_alpha=0, legend_label="aileron cut-out layers")
+    f.patch(np.r_[ys, ys[::-1]], np.r_[le[:, 0], te[::-1, 0]], fill_color=COLORS["fill"], line_alpha=0)
+    f.line(ys, le[:, 0], color=COLORS["le"], line_width=2, legend_label="leading edge")
+    f.line(ys, te[:, 0], color=COLORS["te"], line_width=2, legend_label="trailing edge")
+    if slices:
+        for k, y in enumerate(c.blocks.slice_locations):
+            f.line([y, y], [xr[0] - pad, xr[1] + pad], color=COLORS["slice"], line_dash="dashed")
+        f.text(list(c.blocks.slice_locations), [xr[0] - pad] * len(c.blocks.slice_locations),
+               text=[str(k) for k in range(len(c.blocks.slice_locations))], text_font_size="10px",
+               text_align="center", text_baseline="bottom", text_color="#555555")
+    xw = blockcheck.near_wake_x(c)
+    if xw is not None:
+        f.line([0, c.blocks.slice_locations[-1]], [xw, xw], color="purple", line_dash="dotdash",
+               legend_label="near-wake end: TE must stay upstream")
+    f.scatter(np.asarray(st)[:, 1], np.interp(np.asarray(st)[:, 1], ys, le[:, 0]), size=6,
+              color=COLORS["le"], legend_label="planform table rows")
+    f.y_range.flipped = True
+    return bokeh(f)
+
+
 def airfoil_data(name, filename):
     key = (name, filename, airfoils.file_hash(filename))
     if key not in _AIRFOIL_CACHE:
@@ -91,12 +129,11 @@ class GeometryStep:
         self.add_row_btn = pn.widgets.Button(name="Insert row before the tip", button_type="light")
         self.del_row_btn = pn.widgets.Button(name="Delete selected rows", button_type="light")
         self.table_msg = pn.pane.Markdown()
-        self.scale_slices = pn.widgets.Checkbox(name="Scale the slices when the span changes", value=True)
         self.planform_tabs = pn.Tabs(
             ("Parameters", pn.Column(*self.params.values(), self.param_msg)),
             ("Table", pn.Column(self.table, pn.Row(self.add_row_btn, self.del_row_btn), self.table_msg)))
         self.derived = pn.Column(sizing_mode="stretch_width")
-        self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs, self.scale_slices,
+        self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs,
                                       pn.pane.Markdown("### Derived values"), self.derived)
 
         self.plots = pn.Column(sizing_mode="stretch_width")
@@ -208,7 +245,7 @@ class GeometryStep:
             self.param_msg.object = "**Not applied:** " + "; ".join(problems)
             return
         c = self.app.case
-        f = geometry.set_stations(c, p.to_stations(), self.scale_slices.value)
+        f = geometry.set_stations(c, p.to_stations(), self.app.slicing.scale_slices.value)
         c.wing.planform = p.to_dict()
         self.param_msg.object = "_The table is generated from these parameters._"
         self._updating = True
@@ -228,7 +265,7 @@ class GeometryStep:
             self.table_msg.object = "**Not applied:** " + "; ".join(problems)
             return
         self.table_msg.object = ""
-        f = geometry.set_stations(c, rows, self.scale_slices.value)
+        f = geometry.set_stations(c, rows, self.app.slicing.scale_slices.value)
         c.wing.planform = None
         self._updating = True
         try:
@@ -335,30 +372,11 @@ class GeometryStep:
         return out
 
     def planform_plots(self, c, st, outline):
-        out = []
+        out = [top_view(c)]
         b2 = c.half_span
         ys = np.unique(np.r_[np.linspace(0, b2, 101), np.asarray(st)[:, 1]])
         le = np.array([place(np.array([[0.0, 0.0]]), *section_params(st, y), c.cog) for y in ys])[:, :, 0]
         te = np.array([place(np.array([[1.0, 0.0]]), *section_params(st, y), c.cog) for y in ys])[:, :, 0]
-
-        # Top view: span horizontal, flow downwards
-        f = bfig("Top view of the half wing (flow downwards, dashed: slices)", "y (m)", "x (m)", height=360,
-                 hover=[("y", "$x{0.000}"), ("x", "$y{0.000}")])
-        f.patch(np.r_[ys, ys[::-1]], np.r_[le[:, 0], te[::-1, 0]], fill_color=COLORS["fill"], line_alpha=0)
-        f.line(ys, le[:, 0], color=COLORS["le"], line_width=2, legend_label="leading edge")
-        f.line(ys, te[:, 0], color=COLORS["te"], line_width=2, legend_label="trailing edge")
-        xr = (float(min(le[:, 0].min(), te[:, 0].min())), float(max(le[:, 0].max(), te[:, 0].max())))
-        pad = 0.15 * (xr[1] - xr[0] + 1e-9)
-        for s in c.blocks.slice_locations:
-            f.line([s, s], [xr[0] - pad, xr[1] + pad], color=COLORS["slice"], line_dash="dashed")
-        xw = blockcheck.near_wake_x(c)
-        if xw is not None:
-            f.line([0, c.blocks.slice_locations[-1]], [xw, xw], color="purple", line_dash="dotdash",
-                   legend_label="near-wake end: TE must stay upstream")
-        f.scatter(np.asarray(st)[:, 1], np.interp(np.asarray(st)[:, 1], ys, le[:, 0]), size=6,
-                  color=COLORS["le"], legend_label="table rows")
-        f.y_range.flipped = True
-        out.append(bokeh(f))
 
         # Front view: height of LE and TE along the span
         f = bfig("Front view: height of LE and TE along the span (dihedral, twist)", "y (m)", "z (m)", height=220,

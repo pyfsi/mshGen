@@ -5,7 +5,7 @@ Inputs:  C-grid radius R/c (mesh_scale), far field (symTip)
 Plots:   root plane (C-domain and root section), 3D extent seen from above (planform, patches)
 Fixed by mshGen (shown): wake length 2R, sizes based on the root chord.
 The mshGen level (mesh_level) and the flow conditions are set in step 4 (meshing); the exterior block
-vertices and the slices in step 3 (blocks).
+vertices in step 3b, the slices in step 3a.
 '''
 import math
 

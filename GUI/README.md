@@ -7,7 +7,8 @@ in `mshGen/cases/<case>/`, which can also be rebuilt without the GUI. The plan a
 Status: **M6** (all milestones of the plan). All steps are editable:
 - geometry: airfoil, 2D/3D, COG, planform;
 - domain: R/c, far field;
-- blocks: slices, chordwise divisions, exterior vertices, aileron, patches;
+- spanwise slicing (3a): slices, aileron cut-out layers, patch `extra`;
+- airfoil blocking (3b): chordwise divisions, exterior vertices, wingUp/wingDown;
 - meshing: level, flow conditions, cells and gradings, with sizing helpers (y+, chordwise, wake, spanwise, cell budget) and
   a 2D mesh preview identical to blockMesh's.
 
@@ -47,7 +48,8 @@ mshGen/GUI/run_gui.sh            # optional: port, default 5006
    password stored in `~/.config/mshgen_gui/users.json`. The file is created on first start and is
    readable only by you.
 2. In VS Code (Remote), the port is forwarded automatically (PORTS tab). Open the URL in your
-   local browser. `/app?case=MegAWES_wing&step=3` opens a given case and step directly.
+   local browser. `/app?case=MegAWES_wing&step=3b` opens a given case and step directly
+   (steps 1, 2, 3a, 3b, 4, 5).
 3. The server listens on this machine only (127.0.0.1). The password keeps other users logged in on
    the same machine out.
 
@@ -85,7 +87,7 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
 - Plots (zoom with the mouse wheel; click a legend entry to hide it):
   - the airfoil as mshGen reads it: points, removed point, splines, camber line;
   - the root section in mesh coordinates;
-  - top view with the slices and the near-wake line;
+  - top view with the near-wake line;
   - front view;
   - 3D view (drag to rotate; an image with view controls if the browser has no WebGL).
 - **Derived values** (left, under the planform): span, area, aspect ratio, taper, MAC, sweep, twist.
@@ -102,22 +104,28 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
 - Plots: the root plane with the C-domain and the root section, and the domain seen from above
   with the planform and patches. (The exterior block vertices and the slices are in step 3.)
 
-**3. Blocks** (editable)
+**3a. Spanwise slicing** (editable): where the block vertices are placed along the span. Cells and
+gradings are not set here (step 4).
 - **Slices**: edit y in the table to move a slice (root and tip are fixed).
-  - **Add slice** places the new slice at the nearest cell face, so the cells don't change.
+  - **Add slice** places the new slice at a cell face of the current spanwise mesh.
   - **Delete** merges the two layers.
   - **Suggest slices** places them at the root, planform kinks, around the tip, and the far field.
+  - **Scale the slices when the span changes** (in step 1), so the tip slice stays at the tip.
+- **Top view** of the half wing with the numbered slices, the aileron layers and the near-wake line.
+- Per layer: aileron cut-out layers, ARTIFICIOUS (first wing layers as patch `extra`).
+
+**3b. Airfoil blocking** (editable): the blocks in each slice.
 - **Chordwise divisions** of the airfoil (e03 | e04 | ... | e07), optionally the same position on
   both sides. The full list of 16 airfoil vertices is under *advanced*.
 - **Exterior vertices**: drag them in the plot with the point-draw tool, or edit the table. They
   stay on their boundary (top/bottom, C-arc, outlet).
-- Aileron cut-out layers, SPLIT (wingUp/wingDown), ARTIFICIOUS (patch `extra`).
+- SPLIT: wing surface as wingUp / wingDown.
 - **Block layout** of any slice, exactly as mshGen generates it. Colours show valid, skewed and
   folded blocks; hover a block for its number and corner angles. Edge names e00–e10 are drawn,
   with zoom presets for the whole domain, the airfoil and the trailing edge.
 
 **Blocks** in the sidebar (all steps): a status line for the block vertices and the block check; its
-**Details** open by themselves when the vertices are outdated or a block is invalid. Step 3, where
+**Details** open by themselves when the vertices are outdated or a block is invalid. Step 3b, where
 the vertices are edited, shows the same panel in full:
 - Where the vertices come from: mshGen defaults, outdated, or custom.
 - Recompute button.
@@ -290,7 +298,7 @@ python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
 - `docs/`: tutorial video and its chapters
 - `ui/`:
   - `common.py`, `vertexpanel.py`, `view3d.py` (3D views: WebGL probe, server-rendered images)
-  - `step1_geometry.py`, `step2_domain.py`, `step3_blocks.py`
+  - `step1_geometry.py`, `step2_domain.py`, `step3_blocks.py` (3a slicing, 3b blocking)
   - `step4_meshing.py`, `helpers.py`
   - `build.py` (step 5)
 - `templates/`: `generate_mesh.py`, `Allrun.pre`, OpenFOAM files

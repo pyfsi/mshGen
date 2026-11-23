@@ -4,7 +4,9 @@ app.py: mshGen GUI (Panel, in the browser). Start it with GUI/run_gui.sh.
 The app holds the case being edited (in memory); "Save" writes case.json and all case files
 (recomputing the block vertices first if the geometry changed). Steps:
   1. Geometry                         ui/step1_geometry.py
-  2. Domain, 3. Blocks, 4. Meshing    ui/step2_domain.py, ui/step3_blocks.py, ui/step4_meshing.py
+  2. Domain                           ui/step2_domain.py
+  3a. Spanwise slicing, 3b. Airfoil blocking   ui/step3_blocks.py
+  4. Meshing                          ui/step4_meshing.py
   5. Build & check                    ui/build.py
 See GUI/PLAN.md.
 '''
@@ -25,7 +27,7 @@ from ui.build import BuildStep  # noqa: E402
 from ui.step4_meshing import MeshingStep  # noqa: E402
 from ui.step1_geometry import GeometryStep  # noqa: E402
 from ui.step2_domain import DomainStep  # noqa: E402
-from ui.step3_blocks import BlocksStep  # noqa: E402
+from ui.step3_blocks import BlockingStep, SlicingStep  # noqa: E402
 from ui.vertexpanel import VertexPanel  # noqa: E402
 from ui.view3d import View3DSettings  # noqa: E402
 
@@ -60,11 +62,13 @@ class App:
 
         self._layout_cache = (None, None)
         self._model_cache = (None, None)
-        # Optional URL parameters: /app?case=<name>&step=<1-5>&view3d=<auto|interactive|image>
+        # Optional URL parameters: /app?case=<name>&step=<1|2|3a|3b|4|5>&view3d=<auto|interactive|image>
         args = pn.state.session_args or {}
         self.view3d = View3DSettings(self, initial=args.get("view3d", [b"auto"])[0].decode())
         self.vertex_panel = VertexPanel(self)
-        self.steps = [GeometryStep(self), DomainStep(self), BlocksStep(self), MeshingStep(self), BuildStep(self)]
+        self.slicing, self.blocking = SlicingStep(self), BlockingStep(self)
+        self.meshing, self.build = MeshingStep(self), BuildStep(self)
+        self.steps = [GeometryStep(self), DomainStep(self), self.slicing, self.blocking, self.meshing, self.build]
         self.step = pn.widgets.RadioBoxGroup(name="Step", options=[s.title for s in self.steps],
                                              value=self.steps[0].title)
         self.main = pn.Column()
@@ -87,8 +91,10 @@ class App:
             main=[self.main], accent_base_color="#2c6e9b", header_background="#2c6e9b", sidebar_width=330)
         want_case = args.get("case", [b""])[0].decode()
         want_step = args.get("step", [b""])[0].decode()
-        if want_step.isdigit() and 1 <= int(want_step) <= len(self.steps):
-            self.step.value = self.steps[int(want_step) - 1].title
+        labels = {s.title.split(".")[0]: s.title for s in self.steps}
+        labels.setdefault("3", self.slicing.title)          # old links: step=3
+        if want_step in labels:
+            self.step.value = labels[want_step]
         if want_case in self.case_select.options:
             self.case_select.value = want_case          # triggers load_case
             if self.case is None:
@@ -117,8 +123,8 @@ class App:
             fut, done = job
             err = fut.exception()
             done(None if err else fut.result(), err)
-        self.steps[4].poll()
-        self.steps[3].helpers.poll()
+        self.build.poll()
+        self.meshing.helpers.poll()
 
     def set_airfoil_file(self, filename):
         self.airfoil_file = filename
