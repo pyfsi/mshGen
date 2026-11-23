@@ -6,11 +6,12 @@ step3_blocks.py: step 3 of the GUI, the blocks of the domain, in two parts
             per-layer options: aileron cut-out layers, first wing layers as patch 'extra' (ARTIFICIOUS)
     Plot:   top view of the half wing with the slices and the aileron layers
 3b. Airfoil blocking (BlockingStep)
-    Inputs: chordwise divisions of the airfoil, all airfoil vertices (advanced), exterior vertices (table, or
-            drag them in the plot), wing surface as wingUp / wingDown (SPLIT); block vertices panel
-    Plot:   block layout of a selected slice as mshGen generates it: blocks coloured by status (valid / skewed /
-            folded), block numbers and hover info, edge names e00-e10, airfoil, vertices; zoom presets
-Cells and gradings (spanwise per layer, and of the edges e00-e10) are set in step 4.
+    Inputs: airfoil vertices (position along the suction / pressure / camber spline) and exterior vertices, as
+            tables or dragged in the plot (each stays on its spline or boundary; 22 is free); wing surface as
+            wingUp / wingDown (SPLIT); block vertices panel
+    Plots:  small top view with the selected slice; block layout of that slice as mshGen generates it: blocks
+            coloured by status (valid / skewed / folded), block numbers and hover info, airfoil, vertices
+Cells and gradings (spanwise per layer, and along the block edges) are set in step 4.
 Edits of vertices make them "custom" (not recomputed automatically; the vertex panel can reset them).
 '''
 import numpy as np
@@ -28,10 +29,10 @@ from ui.step1_geometry import airfoil_data, top_view
 
 GROUP_COLOR = {"wake": "#c6dbef", "upper": "#9ecae1", "lower": "#a1d99b", "interior": "#fdd0a2"}
 STATUS_COLOR = {"skewed": "#fd8d3c", "folded": "#de2d26", "inverted": "#a50f15"}
-EDGE_LABELS = [("e03", 0, 1), ("e04", 1, 4), ("e05", 4, 7), ("e06", 7, 10), ("e07", 10, 13),
-               ("e00", 7, 29), ("e01", 22, 23), ("e02", 0, 22), ("e09", 23, 24), ("e10", 22, 25)]
+SPLINE_COLOR = {"suction": "#08519c", "pressure": "#006d2c", "camber": "#d94801"}
 PLOT_W, PLOT_H = 690, 580
-AIRFOIL_LABELS = ("e02", "e03", "e04", "e05", "e06", "e07", "e08")   # shown only when zoomed in
+FIXED_VERTICES = [0, 13]                    # TE, LE
+NO_STATIONS = [[0, 0, 1.0, 0, 0, 0]]
 
 
 def block_group(k):
@@ -46,13 +47,49 @@ def editors_readonly(columns):
     return {c: None for c in columns}
 
 
+class SliceTopView:
+    '''Small top view of the half wing (flow downwards) with all slices and the selected one highlighted.'''
+
+    def __init__(self):
+        f = figure(width=PLOT_W, height=200, tools="", toolbar_location=None)
+        f.xaxis.axis_label, f.yaxis.axis_label = "y (m)", "x (m)"
+        self.src_wing = ColumnDataSource(dict(y=[], x=[]))
+        f.patch("y", "x", source=self.src_wing, fill_color="#d9d9d9", line_color="#636363")
+        self.src_slices = ColumnDataSource(dict(ys=[], xs=[]))
+        f.multi_line("ys", "xs", source=self.src_slices, color="#969696", line_dash="dashed")
+        self.src_sel = ColumnDataSource(dict(y=[], x=[]))
+        f.line("y", "x", source=self.src_sel, color="#de2d26", line_width=3)
+        self.src_lab = ColumnDataSource(dict(y=[], x=[], text=[]))
+        f.text("y", "x", text="text", source=self.src_lab, text_font_size="10px", text_align="left", x_offset=3,
+               text_baseline="top", text_color="#555555")
+        f.y_range.flipped = True
+        self.figure = f
+        self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
+
+    def update(self, case, sl):
+        st = case.wing_stations or NO_STATIONS
+        b2 = case.half_span or 1.0
+        s = case.blocks.slice_locations
+        ys = np.unique(np.r_[np.linspace(0, b2, 61), np.asarray(st)[:, 1]])
+        le = np.array([place(np.array([[0.0, 0.0]]), *section_params(st, y), case.cog)[0][0] for y in ys])
+        te = np.array([place(np.array([[1.0, 0.0]]), *section_params(st, y), case.cog)[0][0] for y in ys])
+        pad = 0.15 * (te.max() - le.min() + 1e-9)
+        lo, hi = float(le.min() - pad), float(te.max() + pad)
+        self.src_wing.data = dict(y=list(np.r_[ys, ys[::-1]]), x=list(np.r_[le, te[::-1]]))
+        self.src_slices.data = dict(ys=[[y, y] for y in s], xs=[[lo, hi]] * len(s))
+        self.src_sel.data = dict(y=[s[sl], s[sl]], x=[lo, hi])
+        self.src_lab.data = dict(y=list(s), x=[lo] * len(s), text=[str(k) for k in range(len(s))])
+        self.figure.title.text = "Top view: slice {} at y = {:.4g} m (red)".format(sl, s[sl])
+
+
 class BlockPlot:
-    '''Block layout of one slice; exterior vertices can be dragged (kept on their boundary).'''
+    '''Block layout of one slice. Exterior vertices (kept on their boundary) and airfoil vertices (kept on their
+    spline) can be dragged with the point-draw tool.'''
 
     def __init__(self, step):
         self.step = step
         self._updating = False
-        self._ext_prev = None
+        self._prev = {}
         self.slice = 0
         self.zoom = "Whole domain"
         self.x_range, self.y_range = Range1d(0, 1), Range1d(0, 1)
@@ -69,22 +106,34 @@ class BlockPlot:
         f.line("x", "z", source=self.src_outer, color="black", line_width=1.5)
         self.src_airfoil = ColumnDataSource(dict(x=[], z=[]))
         self.r_airfoil = f.patch("x", "z", source=self.src_airfoil, fill_color="#444444", line_color="#222222")
-        self.src_int = ColumnDataSource(dict(x=[], z=[], id=[]))
-        f.scatter("x", "z", source=self.src_int, size=5, color="black")
-        self.r_int_text = f.text("x", "z", text="id", source=self.src_int, text_font_size="10px", x_offset=3,
-                                 y_offset=-3, text_color="black")
+        self.texts = []
+        # fixed (TE, LE) and derived (16-21) airfoil vertices
+        self.src_fix = ColumnDataSource(dict(x=[], z=[], id=[], info=[]))
+        r_fix = f.scatter("x", "z", source=self.src_fix, size=6, marker="square", color="black")
+        self.texts.append(f.text("x", "z", text="id", source=self.src_fix, text_font_size="10px", x_offset=4,
+                                 y_offset=-4, text_color="black"))
+        self.src_der = ColumnDataSource(dict(x=[], z=[], id=[], info=[]))
+        r_der = f.scatter("x", "z", source=self.src_der, size=6, fill_color="white", line_color="#737373")
+        self.texts.append(f.text("x", "z", text="id", source=self.src_der, text_font_size="10px", x_offset=4,
+                                 y_offset=-4, text_color="#737373"))
+        # movable airfoil vertices, coloured by their spline
+        self.src_air = ColumnDataSource(dict(x=[], z=[], id=[], color=[], info=[]))
+        r_air = f.scatter("x", "z", source=self.src_air, size=10, color="color", alpha=0.9)
+        self.texts.append(f.text("x", "z", text="id", source=self.src_air, text_font_size="11px", x_offset=6,
+                                 y_offset=-6, text_color="color"))
+        f.add_tools(HoverTool(renderers=[r_air, r_fix, r_der], tooltips=[("vertex", "@id"), ("", "@info")]))
+        # exterior vertices
         self.src_ext = ColumnDataSource(dict(x=[], z=[], id=[]))
         r_ext = f.scatter("x", "z", source=self.src_ext, size=11, color="purple", alpha=0.8)
         f.text("x", "z", text="id", source=self.src_ext, text_font_size="11px", x_offset=6, y_offset=-6,
                text_color="purple")
         f.add_tools(HoverTool(renderers=[r_ext], tooltips=[("exterior vertex", "@id"), ("x", "@x{0.000}"),
                                                             ("z", "@z{0.000}")]))
-        draw = PointDrawTool(renderers=[r_ext], add=False, description="Drag exterior vertices")
+        draw = PointDrawTool(renderers=[r_ext, r_air], add=False, description="Drag vertices")
         f.add_tools(draw)
-        self.src_labels = ColumnDataSource(dict(x=[], z=[], text=[]))
-        f.text("x", "z", text="text", source=self.src_labels, text_font_size="12px", text_font_style="bold",
-               text_color="#08519c", text_align="center", y_offset=-6)
-        self.src_ext.on_change("data", self.on_drag)
+        f.toolbar.active_drag = draw
+        self.src_ext.on_change("data", lambda attr, old, new: self.on_drag("ext", new))
+        self.src_air.on_change("data", lambda attr, old, new: self.on_drag("air", new))
         self.figure = f
         self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
 
@@ -99,7 +148,8 @@ class BlockPlot:
         y = c.blocks.slice_locations[sl]
         types = layer_types(c)
         xz = v[sl][:, [0, 2]]
-        dz = section_params(c.wing_stations or [[0, 0, 1.0, 0, 0, 0]], y)[3]
+        sec = section_params(c.wing_stations or NO_STATIONS, y)
+        dz = sec[3]
         xs, ys, col, blk, stat, ang, grp = [], [], [], [], [], [], []
         for k in lay["active"][layer]:
             st, amin, amax = lay["status"][(layer, k, sl)]
@@ -114,11 +164,12 @@ class BlockPlot:
         R = blocks.radius(c)
         th = np.linspace(np.pi / 2, 3 * np.pi / 2, 120)
         a = airfoil_data(c.airfoil.name, app.airfoil_file)
-        ax, az = place(a.outline(), *section_params(c.wing_stations or [[0, 0, 1.0, 0, 0, 0]], y), c.cog)
+        ax, az = place(a.outline(), *sec, c.cog)
         flow = types[layer] == "flow"
-        labels = [(n, i, j) for n, i, j in EDGE_LABELS] + ([("e08", 4, 16)] if flow else [])
-        if self.zoom == "Whole domain":
-            labels = [lab for lab in labels if lab[0] not in AIRFOIL_LABELS]
+        pts = c.blocks.interior_points
+        cut = sl in blocks.aileron_slices(c)
+        air = blocks.EDITABLE_VERTICES
+        der = list(blocks.DERIVED) if flow else []
         self._updating = True
         try:
             self.src_blocks.data = dict(xs=xs, ys=ys, color=col, block=blk, status=stat, angles=ang, group=grp)
@@ -126,13 +177,24 @@ class BlockPlot:
                                        z=list(dz + np.r_[R, R * np.sin(th), -R, R]))
             self.src_airfoil.data = dict(x=list(ax), z=list(az))
             self.r_airfoil.glyph.fill_alpha = 0.0 if flow else 1.0
-            self.src_int.data = dict(x=list(xz[:16, 0]), z=list(xz[:16, 1]), id=[str(i) for i in range(16)])
+            self.src_fix.data = dict(x=list(xz[FIXED_VERTICES, 0]), z=list(xz[FIXED_VERTICES, 1]),
+                                     id=[str(i) for i in FIXED_VERTICES], info=["trailing edge (fixed)",
+                                                                                "leading edge (fixed)"])
+            self.src_der.data = dict(x=list(xz[der, 0]), z=list(xz[der, 1]), id=[str(i) for i in der],
+                                     info=["halfway between {} and {} (mshGen)".format(*blocks.DERIVED[i])
+                                           for i in der])
+            self.src_air.data = dict(
+                x=list(xz[air, 0]), z=list(xz[air, 1]), id=[str(i) for i in air],
+                color=[SPLINE_COLOR[blocks.SPLINE_NAME[pts[i][1]]] for i in air],
+                info=["{} side, position {:.4g}".format(blocks.SPLINE_NAME[pts[i][1]], pts[i][0])
+                      + (" (set by the aileron cut in this slice)" if cut and i in (4, 5, 6) else "")
+                      for i in air])
             self.src_ext.data = dict(x=list(xz[22:, 0]), z=list(xz[22:, 1]), id=[str(i) for i in range(22, 39)])
-            self._ext_prev = (np.array(xz[22:, 0]), np.array(xz[22:, 1]), dz)
-            self.src_labels.data = dict(x=[0.5 * (xz[i, 0] + xz[j, 0]) for _, i, j in labels],
-                                        z=[0.5 * (xz[i, 1] + xz[j, 1]) for _, i, j in labels],
-                                        text=[n for n, _, _ in labels])
-            self.r_int_text.visible = self.zoom != "Whole domain"
+            self._prev = {"air": (list(air), np.array(xz[air, 0]), np.array(xz[air, 1])),
+                          "ext": (list(range(22, 39)), np.array(xz[22:, 0]), np.array(xz[22:, 1]))}
+            self._slice_y, self._slice, self._dz = y, sl, dz
+            for t in self.texts:
+                t.visible = self.zoom != "Whole domain"
         finally:
             self._updating = False
         self.figure.title.text = "Slice {} at y = {:.4g} m: blocks of layer {} ({}), as mshGen generates them".format(
@@ -162,13 +224,12 @@ class BlockPlot:
             hz = hx / ratio
         self.x_range.start, self.x_range.end = cx - hx, cx + hx
         self.y_range.start, self.y_range.end = cz - hz, cz + hz
-        self.r_int_text.visible = zoom != "Whole domain"
 
     # ---------------- drag ---------------- #
-    def on_drag(self, attr, old, new):
-        if self._updating or self._ext_prev is None:
+    def on_drag(self, kind, new):
+        if self._updating or kind not in self._prev:
             return
-        px, pz, dz = self._ext_prev
+        ids, px, pz = self._prev[kind]
         x, z = np.asarray(new.get("x", []), float), np.asarray(new.get("z", []), float)
         if len(x) != len(px):                       # a point was deleted (backspace): restore
             self.update()
@@ -176,10 +237,24 @@ class BlockPlot:
         moved = np.where(np.hypot(x - px, z - pz) > 1e-9 * (1 + np.abs(px).max()))[0]
         if len(moved) == 0:
             return
-        c = self.step.app.case
-        for i in moved:
-            blocks.move_exterior(c, 22 + int(i), float(x[i]), float(z[i]) - dz)
-        self.step.app.changed()
+        app = self.step.app
+        c = app.case
+        try:
+            for i in moved:
+                vid = ids[int(i)]
+                if kind == "ext":
+                    blocks.move_exterior(c, vid, float(x[i]), float(z[i]) - self._dz)
+                elif vid in (4, 5, 6) and self._slice in blocks.aileron_slices(c):
+                    raise ValueError("in slice {} mshGen places vertices 4, 5, 6 at the aileron cut; move them in "
+                                     "a slice without the cut".format(self._slice))
+                else:
+                    blocks.move_interior(c, vid, airfoil_data(c.airfoil.name, app.airfoil_file),
+                                         float(x[i]), float(z[i]), self._slice_y)
+        except ValueError as e:
+            app.notify("warning", "Not moved: " + str(e))
+            self.update()
+            return
+        app.changed()
         self.step.refresh(plot=True, tables=True)
 
 
@@ -345,34 +420,39 @@ class BlockingStep:
         self.app = app
         self._updating = False
 
-        # Chordwise divisions and vertices
-        self.div_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, layout="fit_data_stretch",
-                                              sizing_mode="stretch_width", editors=editors_readonly(["division"]))
-        self.link = pn.widgets.Checkbox(name="same position on both sides", value=True)
-        self.vert_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, height=300,
+        # Vertices
+        self.vert_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, height=390,
                                                layout="fit_data_stretch", sizing_mode="stretch_width",
-                                               editors=editors_readonly(["vertex", "spline", "role"]))
+                                               editors=editors_readonly(["vertex", "boundary"]))
+        self.cut_msg = pn.pane.Markdown()
         self.ext_table = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, height=300,
                                               layout="fit_data_stretch", sizing_mode="stretch_width",
                                               editors=editors_readonly(["vertex", "boundary"]))
         self.split = pn.widgets.Checkbox(name="Wing surface as wingUp / wingDown (SPLIT)")
         self.vertex_box = pn.Column(sizing_mode="stretch_width")
 
-        # Plot
+        # Plots
+        self.top = SliceTopView()
         self.plot = BlockPlot(self)
         self.slice_sel = pn.widgets.IntSlider(name="Slice", start=0, end=1, value=0, width=300)
         self.zoom = pn.widgets.RadioButtonGroup(options=["Whole domain", "Airfoil", "Trailing edge"],
                                                 value="Whole domain", button_type="primary", width=400)
         self.plot_msg = pn.pane.Markdown()
+        swatch = '<span style="background:{};padding:2px 8px;margin-right:6px;border:1px solid #999">{}</span>'
+        dot = '<span style="color:{};font-size:16px">&#9679;</span> {} &nbsp; '
         legend = pn.pane.HTML(
-            "".join('<span style="background:{};padding:2px 8px;margin-right:6px;border:1px solid #999">{}</span>'.format(c, t)
-                    for t, c in [("wake", GROUP_COLOR["wake"]), ("upper side", GROUP_COLOR["upper"]),
-                                 ("lower side", GROUP_COLOR["lower"]), ("inside contour (flow layers)", GROUP_COLOR["interior"]),
-                                 ("skewed", STATUS_COLOR["skewed"]), ("folded", STATUS_COLOR["folded"])])
-            + "<br><small>Drag the purple exterior vertices with the point-draw tool (toolbar); they stay on their "
-              "boundary. Hover a block for its number and corner angles.</small>")
+            "".join(swatch.format(c, t) for t, c in [
+                ("wake", GROUP_COLOR["wake"]), ("upper side", GROUP_COLOR["upper"]),
+                ("lower side", GROUP_COLOR["lower"]), ("inside contour (flow layers)", GROUP_COLOR["interior"]),
+                ("skewed", STATUS_COLOR["skewed"]), ("folded", STATUS_COLOR["folded"])])
+            + "<br>" + "".join(dot.format(c, t) for t, c in [
+                ("suction side", SPLINE_COLOR["suction"]), ("pressure side", SPLINE_COLOR["pressure"]),
+                ("camber line", SPLINE_COLOR["camber"]), ("exterior", "purple")])
+            + "&#9632; TE / LE (fixed) &nbsp; &#9675; 16-21 (halfway, mshGen)"
+            + "<br><small>Drag the coloured vertices with the point-draw tool (toolbar; zoom to <i>Airfoil</i> for "
+              "the airfoil vertices). Airfoil vertices stay on their spline, exterior vertices on their boundary; "
+              "22 (near-wake end) is free. Hover a block for its number and corner angles.</small>")
 
-        self.div_table.on_edit(self.on_div_edit)
         self.vert_table.on_edit(self.on_vert_edit)
         self.ext_table.on_edit(self.on_ext_edit)
         self.split.param.watch(self.on_split, "value")
@@ -380,18 +460,19 @@ class BlockingStep:
         self.zoom.param.watch(lambda e: self.plot.set_zoom(e.new), "value")
 
         self.inputs = pn.Column(
-            pn.pane.Markdown("### Chordwise divisions of the airfoil"),
-            pn.pane.Markdown("_Positions along the splines (0 = LE, 1 = TE, about x/c). They split the airfoil "
-                             "surface into the edges e03 (TE) ... e07 (LE)._"),
-            self.div_table, self.link,
-            pn.Card(self.vert_table, title="All airfoil vertices (advanced)", collapsed=True),
-            pn.Card(pn.pane.Markdown("_x, z in the root plane (m, origin = COG; other slices add dz). Vertices "
-                                     "on the outer boundary stay on it._"), self.ext_table,
-                    title="Exterior vertices (table)", collapsed=True),
+            pn.pane.Markdown("### Airfoil vertices"),
+            pn.pane.Markdown("_Position along the spline of the boundary: 0 = LE, 1 = TE (about x/c), the same in "
+                             "every slice. TE (0) and LE (13) are fixed; 14 only places 20 and 21; 16-21 lie "
+                             "halfway between their neighbours (mshGen); 15 is not used by mshGen._"),
+            self.vert_table, self.cut_msg,
+            pn.pane.Markdown("### Exterior vertices"),
+            pn.pane.Markdown("_x, z in the root plane (m, origin = COG; other slices add dz). They stay on their "
+                             "boundary; 22 (near-wake end) is free._"),
+            self.ext_table,
             pn.pane.Markdown("### Wing surface patches"), self.split,
             pn.pane.Markdown("### Block vertices"), self.vertex_box,
             width=470, sizing_mode="fixed")
-        self.right = pn.Column(self.slice_sel, self.zoom, self.plot_msg, self.plot.pane, legend,
+        self.right = pn.Column(self.slice_sel, self.top.pane, self.zoom, self.plot_msg, self.plot.pane, legend,
                                sizing_mode="stretch_width")
 
     # ---------------- load / refresh ---------------- #
@@ -416,23 +497,29 @@ class BlockingStep:
             self._fill_tables()
         self.vertex_box.objects = [self.app.vertex_panel.view()]
         if plot:
-            try:
-                self.plot.update(set_range=set_range)
-                self.plot_msg.object = ""
-            except Exception as e:  # noqa: BLE001
-                self.plot_msg.object = "**Cannot draw the blocks:** " + repr(e)
+            self._update_plots(set_range)
+
+    def _update_plots(self, set_range=False):
+        c = self.app.case
+        self.top.pane.visible = c.dim == "3D" and c.half_span is not None
+        try:
+            if self.top.pane.visible:
+                self.top.update(c, min(self.plot.slice, len(c.blocks.slice_locations) - 1))
+            self.plot.update(set_range=set_range)
+            self.plot_msg.object = ""
+        except Exception as e:  # noqa: BLE001
+            self.plot_msg.object = "**Cannot draw the blocks:** " + repr(e)
 
     def _fill_tables(self):
         c = self.app.case
         s = c.blocks.slice_locations
+        cut = blocks.aileron_slices(c)
         self._updating = True
         try:
-            self.div_table.value = pd.DataFrame(blocks.divisions(c))
-            roles = {0: "TE", 13: "LE", 16: "", 2: "camber (division 1)", 5: "camber (division 2)",
-                     8: "camber (division 3)", 12: "camber, nose", 14: "camber helper", 15: "camber helper"}
-            self.vert_table.value = pd.DataFrame([{"vertex": i, "spline": {"s": "suction", "p": "pressure", "c": "camber"}[sp],
-                                                   "role": roles.get(i, ""), "position": p}
-                                                  for i, (p, sp) in enumerate(c.blocks.interior_points)])
+            self.vert_table.value = pd.DataFrame(blocks.interior_rows(c))
+            self.cut_msg.object = ("_Aileron cut: in slices {} mshGen places 4, 5 and 6 itself (on the cut); the "
+                                   "positions here apply to the other slices._".format(", ".join(map(str, cut)))
+                                   if cut else "")
             self.ext_table.value = pd.DataFrame([{"vertex": vid, "boundary": blocks.EXTERIOR_KIND[vid], "x": x, "z": z}
                                                  for vid, (x, z) in zip(range(22, 39), c.blocks.exterior_points)])
             self.split.value = bool(c.options.split)
@@ -451,33 +538,15 @@ class BlockingStep:
         if self._updating:
             return
         self.plot.slice = int(self.slice_sel.value)
-        try:
-            self.plot.update()
-        except Exception as e:  # noqa: BLE001
-            self.plot_msg.object = "**Cannot draw the blocks:** " + repr(e)
+        self._update_plots()
 
     # ---------------- vertices ---------------- #
-    def on_div_edit(self, event):
-        if self._updating:
-            return
-        col, row, val = event.column, int(event.row), float(event.value)
-        try:
-            if self.link.value:
-                blocks.set_division(self.app.case, row, suction=val, pressure=val)
-            elif col == "suction side":
-                blocks.set_division(self.app.case, row, suction=val)
-            else:
-                blocks.set_division(self.app.case, row, pressure=val)
-        except (ValueError, TypeError) as e:
-            self._done("Not applied: " + str(e), "warning")
-            return
-        self._done()
-
     def on_vert_edit(self, event):
         if self._updating:
             return
+        vid = blocks.EDITABLE_VERTICES[int(event.row)]
         try:
-            blocks.set_interior_point(self.app.case, int(event.row), float(event.value))
+            blocks.set_interior_point(self.app.case, vid, float(event.value))
         except (ValueError, TypeError) as e:
             self._done("Not applied: " + str(e), "warning")
             return

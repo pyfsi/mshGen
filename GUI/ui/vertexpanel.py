@@ -25,7 +25,7 @@ class VertexPanel:
         self.widgets = {}
         for where in ("full", "side"):
             btn = pn.widgets.Button(name=RECOMPUTE, button_type="warning", sizing_mode="stretch_width")
-            chk = pn.widgets.Checkbox(name="also reset edge resolution/grading to mshGen defaults")
+            chk = pn.widgets.Checkbox(name="also reset the cells and gradings of step 4 to mshGen defaults")
             btn.on_click(lambda e, chk=chk: self.on_recompute(chk.value))
             self.widgets[where] = (btn, chk)
         self.layout = pn.Column(sizing_mode="stretch_width")          # step 3b
@@ -53,7 +53,7 @@ class VertexPanel:
             if error:
                 self.app.notify("error", "Recompute failed: " + str(error))
             else:
-                self.app.notify("success", "Block vertices recomputed" + (" and edges reset" if result else ""))
+                self.app.notify("success", "Block vertices recomputed" + (" and cells/gradings reset" if result else ""))
             self.app.changed(refresh_step=True)
         self.app.run_background(lambda: geometry.recompute_vertices(c, f, reset_edges=reset), done)
 

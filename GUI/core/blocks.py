@@ -6,9 +6,10 @@ Slices
   - remove_slice: merge two layers (cell count summed, grading from the first and last cell sizes)
   - set_slice: move a slice (cell counts and gradings kept)
   - suggest_slices: root, planform kinks, refinement around the tip, tip, far field
-Chordwise divisions (airfoil vertices 0-15, positions along the splines, 0 = LE, 1 = TE)
-  - DIVISIONS: the four divisions of the airfoil surface, with their camber vertex
-  - set_division: move a division on the suction/pressure side, the camber vertex follows
+Airfoil vertices 0-15 (positions along the suction / pressure / camber splines, 0 = LE, 1 = TE)
+  - EDITABLE_VERTICES, interior_rows: the vertices that can be moved (table of step 3b)
+  - set_interior_point / move_interior: by position, or to the nearest point of its spline (dragged in the plot)
+  - DIVISIONS / set_division: move a division on the suction/pressure side, the camber vertex follows
 Exterior vertices 22-38 (x, z in m)
   - EXTERIOR_KIND: where each vertex lives (outer boundary, outlet, wake line)
   - move_exterior: move a vertex and keep it on its boundary
@@ -204,10 +205,17 @@ def _graded_layer(L, first, last):
 # ---------------------------------------------------------------------------------------------- #
 
 # name, suction-side vertex, pressure-side vertex, camber vertex
-DIVISIONS = [("TE segment end (e03 | e04)", 1, 3, 2),
-             ("aft segment end (e04 | e05)", 4, 6, 5),
-             ("mid segment end (e05 | e06)", 7, 9, 8),
-             ("nose segment start (e06 | e07)", 10, 11, None)]
+DIVISIONS = [("TE segment end", 1, 3, 2),
+             ("aft segment end", 4, 6, 5),
+             ("mid segment end", 7, 9, 8),
+             ("nose segment start", 10, 11, None)]
+
+# Airfoil vertices 0-15 (mshGen's interior points). 0 (TE, camber at 1) and 13 (LE, camber at 0) are fixed;
+# 14 (camber) only places 20 and 21; 15 is not used by mshGen. 16-21 are not inputs: mshGen puts them halfway
+# between 4-5, 5-6, 7-8, 8-9, 10-14 and 14-11 (corners of the blocks inside the contour, flow layers only).
+EDITABLE_VERTICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14]
+SPLINE_NAME = {"s": "suction", "p": "pressure", "c": "camber"}
+DERIVED = {16: (4, 5), 17: (5, 6), 18: (7, 8), 19: (8, 9), 20: (10, 14), 21: (14, 11)}
 
 
 def divisions(case):
@@ -250,7 +258,40 @@ def division_problems(points):
     return p
 
 
+def interior_rows(case):
+    '''Rows of the airfoil vertex table: vertex, boundary (suction / pressure / camber), position along it.'''
+    p = case.blocks.interior_points
+    return [{"vertex": i, "boundary": SPLINE_NAME[p[i][1]], "position": p[i][0]} for i in EDITABLE_VERTICES]
+
+
+def aileron_slices(case):
+    '''Slices where mshGen replaces vertices 4, 5, 6 by the aileron cut (both slices of every aileron layer).'''
+    return sorted({k for layer in (case.options.aileron_layers or []) for k in (layer, layer + 1)})
+
+
+def spline_position(case, airfoil, line, x, z, y, n=4001):
+    '''Position along spline line ('s', 'p', 'c') of the point nearest to (x, z) in the slice at y.'''
+    from scipy.interpolate import splev
+
+    from .planform import place, section_params
+    u = np.linspace(0.0, 1.0, n)
+    px, pz = place(np.array(splev(u, airfoil.vertex_tck[line])).T,
+                   *section_params(case.wing_stations or [[0, 0, 1.0, 0, 0, 0]], y), case.cog)
+    return float(u[np.argmin(np.hypot(px - x, pz - z))])
+
+
+def move_interior(case, vertex, airfoil, x, z, y):
+    '''Move airfoil vertex to the point of its spline nearest to (x, z) (slice at y). Returns the position.'''
+    if vertex not in EDITABLE_VERTICES:
+        raise ValueError("vertex {} cannot be moved".format(vertex))
+    pos = round(spline_position(case, airfoil, case.blocks.interior_points[vertex][1], x, z, y), 4)
+    set_interior_point(case, vertex, pos)
+    return pos
+
+
 def set_interior_point(case, vertex, position):
+    if vertex not in EDITABLE_VERTICES:
+        raise ValueError("vertex {} is fixed".format(vertex))
     p = [list(v) for v in case.blocks.interior_points]
     p[vertex][0] = float(position)
     problems = division_problems(p)

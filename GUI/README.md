@@ -8,7 +8,7 @@ Status: **M6** (all milestones of the plan). All steps are editable:
 - geometry: airfoil, 2D/3D, COG, planform;
 - domain: R/c, far field;
 - spanwise slicing (3a): slices, aileron cut-out layers, patch `extra`;
-- airfoil blocking (3b): chordwise divisions, exterior vertices, wingUp/wingDown;
+- airfoil blocking (3b): airfoil and exterior vertices (tables or dragged), wingUp/wingDown;
 - meshing: level, flow conditions, cells and gradings, with sizing helpers (y+, chordwise, wake, spanwise, cell budget) and
   a 2D mesh preview identical to blockMesh's.
 
@@ -115,14 +115,18 @@ gradings are not set here (step 4).
 - Per layer: aileron cut-out layers, ARTIFICIOUS (first wing layers as patch `extra`).
 
 **3b. Airfoil blocking** (editable): the blocks in each slice.
-- **Chordwise divisions** of the airfoil (e03 | e04 | ... | e07), optionally the same position on
-  both sides. The full list of 16 airfoil vertices is under *advanced*.
-- **Exterior vertices**: drag them in the plot with the point-draw tool, or edit the table. They
-  stay on their boundary (top/bottom, C-arc, outlet).
+- **Airfoil vertices**: one table with vertex, boundary (suction, pressure, camber) and position
+  along that spline (0 = LE, 1 = TE, about x/c), the same in every slice. TE (0) and LE (13) are
+  fixed; 14 only places 20 and 21; 16–21 lie halfway between their neighbours (set by mshGen); 15 is
+  not used by mshGen. In aileron slices mshGen places 4, 5, 6 at the cut itself.
+- **Exterior vertices**: x, z, each on its boundary (top/bottom, C-arc, outlet; 22 is free).
+- Both can be **dragged in the plot** with the point-draw tool: airfoil vertices stay on their
+  spline, exterior vertices on their boundary.
 - SPLIT: wing surface as wingUp / wingDown.
-- **Block layout** of any slice, exactly as mshGen generates it. Colours show valid, skewed and
-  folded blocks; hover a block for its number and corner angles. Edge names e00–e10 are drawn,
-  with zoom presets for the whole domain, the airfoil and the trailing edge.
+- **Top view** with the selected slice in red, and the **block layout** of that slice, exactly as
+  mshGen generates it. Colours show valid, skewed and folded blocks; hover a block for its number and
+  corner angles. Zoom presets for the whole domain, the airfoil and the trailing edge.
+- Cells and gradings along the block edges are set in step 4.
 
 **Blocks** in the sidebar (all steps): a status line for the block vertices and the block check; its
 **Details** open by themselves when the vertices are outdated or a block is invalid. Step 3b, where
@@ -283,7 +287,7 @@ python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
   - `planform.py`: planform parameters ↔ table, derived values
   - `geometry.py`: geometry changes, vertex recompute, new wings
   - `blockcheck.py`: inverted, folded and skewed blocks
-  - `blocks.py`: slices, divisions, exterior vertices, domain
+  - `blocks.py`: slices, airfoil and exterior vertices, domain
   - `model.py`: mshGen in memory
   - `preview.py`: 2D slice mesh (blockMesh's interpolation), cell metrics
   - `sizing.py`: sizing helpers and predictions

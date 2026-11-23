@@ -194,7 +194,7 @@ def scenario(r, url, login_png):
         "  1. Geometry      airfoil, planform, mesh origin",
         "  2. Domain        size of the C-grid, far field",
         "  3a. Slicing      slices along the span, aileron and patch layers",
-        "  3b. Blocking     chordwise divisions, vertices, block layout",
+        "  3b. Blocking     airfoil and exterior vertices, block layout",
         "  4. Meshing       level, flow, cells and gradings, helpers, optimiser",
         "  5. Build & check blockMesh, checkMesh, y+, Fluent export, images"],
         seconds=12, sub="Structured C-grid meshes of wings with mshGen and blockMesh")
@@ -353,24 +353,27 @@ def scenario(r, url, login_png):
     r.chapter("Step 3b: Airfoil blocking")
     r.do("T.radio('3b. Airfoil blocking')", 5)
     b.inject()
-    r.shot("Step 3b · Chordwise divisions", "Where the airfoil surface is divided into the edges e03 (TE) ... e07 "
-           "(LE), as positions along the splines (about x/c), on both sides or separately.",
-           TYPED("Tabulator", 0), also=[W_("same position on both sides")], where="right")
-    r.shot("Step 3b · More vertices", "<b>All airfoil vertices</b> (advanced) and the <b>exterior vertices</b> as "
-           "tables.", CARD("All airfoil vertices (advanced)"), also=[CARD("Exterior vertices (table)")],
-           where="right")
+    r.shot("Step 3b · Airfoil vertices", "Each airfoil vertex lies on the suction side, the pressure side or the "
+           "camber line, at a position along that spline (0 = LE, 1 = TE, about x/c).",
+           TYPED("Tabulator", 0), where="right")
+    r.shot("Step 3b · Exterior vertices", "The <b>exterior vertices</b>: x, z, each on its boundary (top, bottom, "
+           "C-arc, outlet; 22 is free).", TYPED("Tabulator", 1), where="right")
     r.do("T.check('Wing surface as wingUp / wingDown (SPLIT)', true)", 2)
     r.shot("Step 3b · Wing surface patches", "<b>SPLIT</b>: the wing surface as wingUp / wingDown (e.g. for FSI).",
            W_("Wing surface as wingUp / wingDown (SPLIT)"), where="right")
     r.shot("Step 3b · Block layout", "The blocks of a slice exactly as mshGen generates them: wake, upper and "
-           "lower side; skewed blocks orange, folded ones red; edge names e00-e10. Hover a block for its number "
-           "and corner angles.", HAS("blocks of layer"), where="left")
+           "lower side; skewed blocks orange, folded ones red. Hover a block for its number and corner angles.",
+           HAS("blocks of layer"), where="left")
     r.do("T.radio('Airfoil')", 3)
-    r.shot("Step 3b · Zoom", "Zoom presets: whole domain, airfoil, trailing edge (or the mouse wheel).",
-           L_("Airfoil"), where="below")
+    r.shot("Step 3b · Zoom", "Zoom presets: whole domain, airfoil, trailing edge (or the mouse wheel). The airfoil "
+           "vertices are coloured by their spline.", L_("Airfoil"), where="below")
+    r.do("T.drag(7, 0.15, 0.1)", 4)
+    r.shot("Step 3b · Drag airfoil vertices", "Airfoil vertices can be dragged too: they stay on their spline "
+           "(here vertex 7 moved along the suction side).", HAS("blocks of layer"), where="left")
     r.do("T.set('Slice', 4)", 3)
-    r.shot("Step 3b · Other slices", "The slider selects the slice: at the tip and beyond, the blocks inside the "
-           "airfoil contour fill the space behind the tip.", W_("Slice"), where="below")
+    r.shot("Step 3b · Other slices", "The slider selects the slice, shown in red in the small top view: at the tip "
+           "and beyond, the blocks inside the airfoil contour fill the space behind the tip.", W_("Slice"),
+           also=[HAS("Top view: slice")], where="below")
     r.do("T.radio('Whole domain')", 2)
     r.do("T.set('Slice', 0)", 3)
     r.do("T.drag(27, -0.4, 0)", 4)

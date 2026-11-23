@@ -180,10 +180,11 @@ window.T = (function () {
     v.model.collapsed = !open;
     return true;
   }
-  function drag(vid, dx, dz) {            // move an exterior vertex like the point-draw tool
+  function drag(vid, dx, dz) {            // move a draggable (exterior or airfoil) vertex like the point-draw tool
     for (const d of window.Bokeh.documents) for (const m of d._all_models.values()) {
-      if (m.data !== undefined && m.data.id !== undefined && m.data.id[0] === "22") {
-        const i = vid - 22;
+      if (m.data !== undefined && m.data.id !== undefined && m.data.z !== undefined
+          && (m.data.id[0] === "22" || m.data.color !== undefined) && m.data.id.indexOf(String(vid)) >= 0) {
+        const i = m.data.id.indexOf(String(vid));
         m.data.x[i] += dx; m.data.z[i] += dz;
         m.setv({ data: m.data }, { check_eq: false });
         return true;

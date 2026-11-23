@@ -8,7 +8,7 @@ import hashlib
 import os
 
 import numpy as np
-from scipy.interpolate import splev
+from scipy.interpolate import splev, splprep
 
 from . import paths
 
@@ -130,6 +130,12 @@ class AirfoilData:
         self.camber = np.array(splev(u, raw.tck_camber)).T
         self.le = self.points[raw.n]
         self.te = self.points[raw.m]
+        # Splines as mshGen evaluates the block vertices (ScaledData: resampled raw splines, refitted with chord-
+        # length parameters; rotating and scaling the section keeps these parameters) in normalised coordinates
+        self.vertex_tck = {}
+        for line, tck in (("s", raw.tck_upper), ("c", raw.tck_camber), ("p", raw.tck_lower)):
+            x, z = splev(np.linspace(0, 1, raw.N), tck)
+            self.vertex_tck[line] = splprep([x, z], s=0)[0]
         thick = np.interp(self.upper[:, 0], self.lower[:, 0], self.lower[:, 1])
         self.max_thickness = float(np.max(self.upper[:, 1] - thick))
         cam = 0.5 * (self.upper[:, 1] + thick)
