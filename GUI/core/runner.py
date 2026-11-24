@@ -20,6 +20,25 @@ def run_allrun(folder, images=False, on_line=None):
     return proc.wait()
 
 
+def run_quality(folder, openfoam_module, on_line=None):
+    '''
+    For a mesh built before the quality fields were part of Allrun.pre: run checkMesh with the quality fields
+    (nonOrthoAngle, skewness, aspectRatio, wallDistance; also rewrites log.checkMesh and the sets) and
+    postProcess -func writeCellCentres in the case folder. Returns the exit code.
+    '''
+    on_line = on_line or (lambda line: print(line, flush=True))
+    script = ("type module > /dev/null 2>&1 || source /etc/profile.d/modules.sh\n"
+              "module purge\nmodule load '{}'\nsource \"$FOAM_BASH\"\n"
+              "checkMesh -writeFields '(nonOrthoAngle skewness aspectRatio wallDistance)' > log.checkMesh 2>&1 || true\n"
+              "postProcess -func writeCellCentres > log.writeCellCentres 2>&1 || exit 1\n"
+              "rm -f constant/Cx constant/Cy constant/Cz\n").format(openfoam_module)
+    proc = subprocess.Popen(["bash", "-c", script], cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1)
+    for line in proc.stdout:
+        on_line(line.rstrip("\n"))
+    return proc.wait()
+
+
 _NUM = r"(-?[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)"
 
 

@@ -55,6 +55,17 @@ mshGen/GUI/run_gui.sh            # optional: port, default 5006
 
 Stop it with Ctrl+C.
 
+### AI summary
+
+The AI summary of step 5 is written by Claude (`claude-opus-5-5`) through **Claude Code**: the GUI runs the
+CLI of the Claude Code extension in VS Code headless (`claude -p`) with your Claude login. No API key and no
+package are needed, and there is no extra bill: it counts towards your Claude plan, like a question in
+Claude Code (about 3,000 input and 3,000 output tokens per summary). The CLI runs without tools, keeps no
+session, and starts in an empty temporary folder.
+
+The GUI finds the CLI in the VS Code extension (`~/.vscode*/extensions/anthropic.claude-code-*`), as `claude`
+on PATH, or at `MSHGEN_CLAUDE_BIN`. If the CLI is not logged in, log in once in the Claude Code extension.
+
 ### 3D views and WebGL
 
 The 3D views (step 1 wing, step 5 walls) are Plotly figures that need WebGL in the browser. A browser
@@ -184,18 +195,29 @@ the vertices are edited, shows the same panel in full:
     wall-normal cell height, wall-normal and wake distributions.
 
 **5. Build & check**
-- **Options**: Fluent export, images (mshGen plots and 13 ParaView views), and the environment
-  modules (Python, OpenFOAM, ParaView).
+- **Options**: Fluent export, images (13 ParaView views), and the environment modules (Python,
+  OpenFOAM, ParaView).
 - **Save and build mesh**: saves the case, runs the block check, then `Allrun.pre` with a live log.
-- **Results**:
-  - checkMesh summary;
-  - **y+ on the walls** per patch, measured on the mesh (automatic after a build);
-  - patches (type, faces);
-  - **Fluent zones** (type, faces; `inlet` is written as pressure-outlet, so set velocity-inlet in
-    Fluent);
-  - **3D view of the wall patches**, with cell edges (drag to rotate, or an image, see
-    [3D views and WebGL](#3d-views-and-webgl));
-  - the images.
+  checkMesh also writes the quality fields (non-orthogonality, skewness, aspect ratio per cell), the
+  cell centres and the sets of flagged cells and faces.
+- **Mesh (last build)**: the checkMesh summary, and next to it the **cells and faces that fail
+  checkMesh** (failed), those it warns about (warning) and **lower-quality cells** (non-orthogonality
+  50–70°, skewness 2–4): a table (count, y range) and a top and a side view with the wing outline
+  (whole domain or zoomed to the wing; click a legend entry to hide a group; hover for the value and
+  position). For a mesh built before this was part of the build: **Analyse the mesh quality** runs
+  checkMesh again (about 30 s).
+- **Fluent mesh**: zones (type, faces; `inlet` is written as pressure-outlet, so set velocity-inlet
+  in Fluent).
+- **AI summary of the mesh**: Claude (`claude-opus-5-5`) reviews the mesh: what is good, a suggested
+  modelling approach (turbulence model, wall treatment for the y+, ...), what can be improved, things
+  to consider and assumptions, a crazy idea, and a motivating end. **Write AI summary** sends
+  technical facts of the case and its build to Claude through Claude Code with your login (no API
+  key, see [AI summary](#ai-summary)): geometry, flow, targets, cell counts, checkMesh results, the
+  flagged groups with their position, y+ on the walls (no case name, description, user name or file
+  paths). The facts sent can be opened below the button. The summary is saved in the case folder
+  (`ai_summary.md`) and shown again later, marked when the mesh was built again afterwards.
+- **3D view of the wall patches**, with cell edges (drag to rotate, or an image, see
+  [3D views and WebGL](#3d-views-and-webgl)), and the images.
 
 ## Case folder
 
@@ -211,6 +233,8 @@ cases/<case>/
   Allrun.images        optional, case-specific extra images (called by Allrun.pre --images)
   system/ constant/    OpenFOAM files (blockMeshDict is written by generate_mesh.py)
   output_files/ constant/polyMesh/ fluentInterface/ images/ log.*     generated
+  constant/C, constant/nonOrthoAngle, skewness, aspectRatio, wallDistance   generated (checkMesh, step 5)
+  ai_summary.md        AI summary of the last build (step 5, optional)
 ```
 
 Without the GUI: `./Allrun.pre [--images]` in the case folder rebuilds everything from these files.
@@ -237,6 +261,16 @@ python GUI/tests/test_m0.py              # about 2 minutes, no OpenFOAM needed
 python GUI/tests/test_m1.py [--openfoam] # with --openfoam about 4 minutes (blockMesh + checkMesh)
 python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
 ```
+
+**test_m9** (`python GUI/tests/test_m9.py [--live]`, about 5 minutes, needs OpenFOAM): step 5 on a
+new NACA0012 wing.
+- The build writes the quality fields and one cell centre per cell; every set of checkMesh becomes a
+  group of its size, failed checks are marked failed, lower-quality cells are in their range.
+- For an older build, Analyse the mesh quality (run_quality) gives the same groups.
+- The facts for the AI summary hold no case name, folder or user name; the Claude Code CLI is
+  found, and a failing CLI gives a readable message.
+- With --live (calls Claude through Claude Code with your login): a summary with the five sections
+  and the closing sentence.
 
 **test_m8** (`python GUI/tests/test_m8.py [--openfoam]`, about 4 minutes, with --openfoam about 12 minutes): the mesh optimiser of step 4
 on new NACA0012 (COARSE, MEDIUM) and FFA_W3_211 wings and a copy of MegAWES_wing.
@@ -316,6 +350,8 @@ earlier quality optimiser at a fixed cell count (`core/quality.py`, no longer in
   - `blockopt.py`: block optimiser of step 3b ([docs/block_optimiser.md](docs/block_optimiser.md))
   - `model.py`: mshGen in memory
   - `preview.py`: 2D slice mesh (blockMesh's interpolation), cell metrics
+  - `meshquality.py`: cells and faces of a built mesh that fail checkMesh or have a lower quality
+  - `aisummary.py`: facts of a built mesh and its AI summary (Claude through the Claude Code CLI)
   - `meshopt.py`: mesh optimiser of step 4 ([docs/mesh_optimiser.md](docs/mesh_optimiser.md)),
     analysis of every slice
   - `sizing.py`: geometric series, y+, sizing functions

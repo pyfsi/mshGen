@@ -192,7 +192,7 @@ def scenario(r, url, login_png):
         "  3a. Slicing      slices along the span, aileron and patch layers",
         "  3b. Blocking     airfoil and exterior vertices, block layout",
         "  4. Meshing       level, targets, flow, mesh optimiser, tables, analysis",
-        "  5. Build & check blockMesh, checkMesh, y+, Fluent export, images"],
+        "  5. Build & check blockMesh, checkMesh, flagged cells, AI summary, Fluent, images"],
         seconds=12, sub="Structured C-grid meshes of wings with mshGen and blockMesh")
     r.card("Start the GUI", [
         "On the cluster, in a terminal:",
@@ -453,11 +453,11 @@ def scenario(r, url, login_png):
     r.chapter("Step 5: Build & check")
     r.do("T.radio('5. Build & check')", 5)
     b.inject()
-    r.do("T.check('also make images (mshGen plots + ParaView views)', true)", 1)
+    r.do("T.check('also make images (ParaView views)', true)", 1)
     r.do("T.card('Environment modules', true)", 2)
-    r.shot("Step 5 · Options", "Images (mshGen plots and 13 ParaView views), export to Fluent, and the modules "
+    r.shot("Step 5 · Options", "Images (13 ParaView views), export to Fluent, and the modules "
            "of Python, OpenFOAM and ParaView on this cluster.",
-           W_("also make images (mshGen plots + ParaView views)"),
+           W_("also make images (ParaView views)"),
            also=[W_("export to Fluent (foamMeshToFluent)"), CARD("Environment modules")], where="right")
     r.do("T.card('Environment modules', false)", 1)
     r.shot("Step 5 · Build", "<b>Save and build mesh</b>: saves the case, runs the block check and Allrun.pre "
@@ -471,12 +471,17 @@ def scenario(r, url, login_png):
     r.shot("Step 5 · Finished", "The build is done.", HAS("== exit code"), where="right")
     r.shot("Step 5 · checkMesh", "The checkMesh summary: cells, cell types, aspect ratio, non-orthogonality, "
            "skewness, failed checks.", HAS("max_non_orthogonality"), where="right")
-    r.wait_for("!!T.find('y+ on the walls', 'has')", 120)
-    r.shot("Step 5 · y+ on the walls", "y+ measured on the built mesh per wall patch (wall distance of the first "
-           "cells): about 30, the target of step 4.", HAS("y+ on the walls"), where="right")
-    r.shot("Step 5 · Patches and Fluent zones", "Patch types and faces, and the zones of the Fluent mesh: "
-           "<b>inlet</b> is written as pressure-outlet, set it to velocity-inlet in Fluent.",
-           HAS("pressure-outlet"), where="right")
+    r.wait_for("!!T.find('Top view (flow downwards)', 'has')", 180)
+    time.sleep(3)
+    r.shot("Step 5 · Flagged cells", "Next to the checkMesh summary: the cells and faces that fail checkMesh, that "
+           "it warns about, and lower-quality cells (non-orthogonality 50-70 deg, skewness 2-4), in a table and a "
+           "top and side view (whole domain or the wing).", HAS("Top view (flow downwards)"),
+           also=[HAS("Side view (looking along the span)")], where="left")
+    r.shot("Step 5 · Fluent zones", "The zones of the Fluent mesh: <b>inlet</b> is written as pressure-outlet, set "
+           "it to velocity-inlet in Fluent.", HAS("pressure-outlet"), where="right")
+    r.shot("Step 5 · AI summary", "<b>Write AI summary</b>: Claude reviews the mesh (what is good, modelling "
+           "approach, improvements, assumptions, a crazy idea) through Claude Code with your login: no API key. It "
+           "sends only technical facts (shown below the button).", BTN("Write AI summary"), where="right")
     r.do("T.click('Show 3D view of the walls')", 3)
     r.wait_for("!!T.typed('Plotly')", 120)
     time.sleep(3)
@@ -487,7 +492,7 @@ def scenario(r, url, login_png):
     r.shot("Step 5 · 3D view of the walls", "The wall patches of the built mesh with cell edges: drag to rotate.",
            TYPED("Plotly"), where="left")
     r.wait_for("!!T.find('Images (last build with images)', 'has')", 120)
-    r.shot("Step 5 · Images", "The images of the build: mshGen's block plots and ParaView views (root plane, "
+    r.shot("Step 5 · Images", "The images of the build: ParaView views (root plane, "
            "leading and trailing edge, first cells, 3D wing, planform, tip, cuts).",
            HAS("Images (last build with images)"), where="left")
 

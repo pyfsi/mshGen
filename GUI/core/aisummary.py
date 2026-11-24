@@ -1,0 +1,236 @@
+'''
+aisummary.py: AI summary of a built mesh (step 5), written by Claude
+
+mesh_facts() collects technical facts of the case and its last build: geometry (airfoil, planform), domain, flow
+(U, nu, Reynolds and Mach number), targets of step 4, cell counts, checkMesh results, the groups of flagged and
+lower-quality cells (core/meshquality.py), y+ measured on the walls and known limitations of mshGen. It contains no
+case name, description, user name or file paths. The GUI shows the facts that are sent.
+
+write_summary() sends them to Claude (MODEL) through the Claude Code CLI of the VS Code extension (or `claude` on
+PATH, or MSHGEN_CLAUDE_BIN), headless (claude -p) with your Claude login: no API key and no extra bill (it counts
+towards your Claude plan). The CLI runs without tools, keeps no session and runs in an empty temporary folder.
+'''
+import glob
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+import numpy as np
+
+MODEL = "claude-opus-5-5"
+ENDING = "Enjoy your simulations! If it is successful, bring cake to the office."
+CLI_TIMEOUT = 900           # s
+SUMMARY_FILE = "ai_summary.md"
+
+SYSTEM = """You review computational meshes for a CFD engineer and write a short, practical summary of one mesh.
+
+The mesh was made with mshGen: a structured C-grid around a wing section, built by OpenFOAM's blockMesh from 27
+blocks per spanwise layer (13 inside the airfoil contour, used only beyond the wing tip, and 14 around the airfoil).
+3D cases are half wings with a symmetry plane at the root; slices beyond the tip extend the domain spanwise. The
+facts you get are measured on the mesh (checkMesh) or are the settings of the case; y+ is a flat-plate estimate
+with the local chord, not a flow result. Use only these facts; if something you would need is not in them, say
+that it is not known instead of guessing. Give numbers where they matter.
+
+Write Markdown with exactly these sections, in this order, each as a level-3 heading:
+### What is good
+### Suggested modelling approach
+(turbulence modelling first: model, wall treatment that fits the y+, transition, compressibility, steady or
+unsteady; then solver settings that matter for this mesh, such as non-orthogonal correctors)
+### What can be improved
+(concrete changes to the mesh or the case, most important first)
+### Things to consider and assumptions
+### A crazy idea
+(one bold but physically sensible idea: an interesting simulation, application or follow-up study for this wing)
+
+Then one short paragraph that motivates the engineer to run the simulations. Use bullet points inside the sections,
+keep the whole summary under about 600 words, and do not add other headings or a title. End the summary with this
+sentence, exactly as written and on its own line: """ + ENDING
+
+
+def _planform(case):
+    st = np.asarray(case.wing_stations, dtype=float)
+    y, c, beta, dx, dz = st[:, 1], st[:, 2], st[:, 3], st[:, 4], st[:, 5]
+    b2 = float(y.max())
+    area = float(np.trapz(c, y))                              # half wing
+    le_sweep = math.degrees(math.atan2(-(dx[-1] - dx[0]), b2)) if b2 > 0 else 0.0
+    dihedral = math.degrees(math.atan2(dz[-1] - dz[0], b2)) if b2 > 0 else 0.0
+    return {"half-span (m)": b2, "root chord (m)": float(c[0]), "tip chord (m)": float(c[-1]),
+            "taper ratio": float(c[-1] / c[0]), "aspect ratio (full wing)": (2 * b2) ** 2 / (2 * area),
+            "twist root / tip (deg)": [float(beta[0]), float(beta[-1])],
+            "leading-edge offset over the span, approx. sweep (deg)": le_sweep,
+            "dihedral, approx. (deg)": dihedral, "planform stations": int(len(st)),
+            "x of leading / trailing edge at the root and the tip (m)": {
+                "root": [round(v, 4) for v in _edges_x(case, 0.0)], "tip": [round(v, 4) for v in _edges_x(case, b2)]}}
+
+
+def _edges_x(case, y):
+    from .planform import place, section_params
+    sec = section_params(case.wing_stations, y)
+    return [float(place(np.array([[f, 0.0]]), *sec, case.cog)[0][0]) for f in (0.0, 1.0)]
+
+
+def mesh_facts(case, folder, airfoil_file, quality_groups=None, yplus=None):
+    '''Technical facts of the case and its last build (no names or paths), for the summary.'''
+    from . import estimate, meshopt
+    from .airfoils import AirfoilData
+    from .estimate import layer_types
+    from .meshquality import summary_rows
+    from .runner import checkmesh_summary
+    c0 = case.root_section()[0]
+    facts = {"case type": "3D half wing" if case.dim == "3D" else "2D airfoil section"}
+    try:
+        a = AirfoilData(case.airfoil.name, airfoil_file)
+        facts["airfoil"] = {"name": case.airfoil.name, "max thickness / chord": round(a.max_thickness, 4),
+                            "max camber / chord": round(a.max_camber, 4)}
+    except Exception:  # noqa: BLE001
+        facts["airfoil"] = {"name": case.airfoil.name}
+    if case.dim == "3D" and case.wing_stations:
+        facts["planform"] = _planform(case)
+    types = layer_types(case)
+    s = case.blocks.slice_locations
+    facts["domain"] = {
+        "C-grid radius / root chord": case.domain.mesh_scale, "outlet": "2 radii behind the C-grid centre",
+        "spanwise slices (y, m)": [round(v, 4) for v in s],
+        "layers": types, "aileron cut-out layers": case.options.aileron_layers or [],
+        "wing surface split in upper and lower patch": bool(case.options.split)}
+    U, nu = case.flow.U, case.flow.nu
+    facts["flow"] = {"free-stream velocity U (m/s)": U, "kinematic viscosity nu (m2/s)": nu,
+                     "Reynolds number (root chord)": U * c0 / nu, "Mach number (with 340 m/s)": U / 340.0}
+    t = meshopt.targets(case)
+    facts["mesh level and targets (step 4)"] = dict(t, level=case.domain.mesh_level)
+    e = case.meshing.edges
+    facts["cells"] = {
+        "total": estimate.cell_count(case),
+        "chordwise per airfoil side": sum(int(e[k][0]) for k in meshopt.CHORD),
+        "wall-normal (airfoil to outer boundary)": int(e["e00"][0]),
+        "wake (near + far)": int(e["e02"][0]) + int(e["e01"][0]),
+        "spanwise per layer": [int(n) for n in case.meshing.layer_resolution] if case.dim == "3D" else None}
+    cm = checkmesh_summary(folder)
+    if cm:
+        facts["checkMesh"] = {k: cm.get(k) for k in ("cells", "hexahedra", "polyhedra", "max_aspect_ratio",
+                                                       "max_non_orthogonality", "avg_non_orthogonality",
+                                                       "max_skewness", "failed_checks", "mesh_ok", "warnings")}
+    if quality_groups:
+        facts["flagged and lower-quality cells (x downstream, y spanwise, z up; the wing root at y = 0)"] = \
+            summary_rows(quality_groups, xyz=True)
+    if yplus:
+        facts["y+ at the first cell centre, per wall patch (flat-plate estimate)"] = {
+            k: {kk: round(vv, 3) if isinstance(vv, float) else vv for kk, vv in v.items()} for k, v in yplus.items()}
+    notes = ["Beyond the tip, the blocks inside the airfoil contour are joined to their neighbours by a "
+             "non-conformal interface (mergePatchPairs), which creates polyhedral cells.",
+             "The largest non-orthogonality is often at the trailing-edge wedge beyond the tip; it follows from the "
+             "trailing-edge angle and cannot be removed by grading.",
+             "High aspect ratio cells (checkMesh: above 1000) come from thin wall-normal cells for the target y+ "
+             "next to long spanwise cells, and from the thin first spanwise cells at the tip face."]
+    if "flow" not in types:
+        notes = notes[2:]
+    facts["known properties of mshGen meshes"] = notes
+    return facts
+
+
+def find_claude_cli():
+    '''Path of the Claude Code CLI: MSHGEN_CLAUDE_BIN, `claude` on PATH, or the newest VS Code extension's binary.'''
+    env = os.environ.get("MSHGEN_CLAUDE_BIN")
+    if env and os.access(env, os.X_OK):
+        return env
+    found = shutil.which("claude")
+    if found:
+        return found
+    home = os.path.expanduser("~")
+    cands = []
+    for root in (".vscode", ".vscode-server", ".vscode-oss", ".cursor", ".cursor-server"):
+        cands += glob.glob(os.path.join(home, root, "extensions", "anthropic.claude-code-*", "resources", "native-binary",
+                                        "claude"))
+    cands += [os.path.join(home, ".local", "bin", "claude"), os.path.join(home, ".claude", "local", "claude")]
+
+    def version(path):
+        m = re.search(r"claude-code-(\d+)\.(\d+)\.(\d+)", path)
+        return tuple(int(v) for v in m.groups()) if m else (0, 0, 0)
+    cands = [c for c in cands if os.path.isfile(c) and os.access(c, os.X_OK)]
+    return max(cands, key=version) if cands else None
+
+
+def cli_status():
+    '''(found, text) about the Claude Code CLI, for the GUI.'''
+    cli = find_claude_cli()
+    if cli:
+        return True, "Claude Code CLI: `{}`".format(cli.replace(os.path.expanduser("~"), "~"))
+    return False, ("No Claude Code CLI found: install the Claude Code extension in VS Code (or the CLI), or set "
+                   "MSHGEN_CLAUDE_BIN to the `claude` binary.")
+
+
+def _cli_env():
+    '''Environment of the CLI: without the markers of a running Claude Code session (when the GUI is started from one)
+    and without API keys, so that your Claude login is used.'''
+    drop = ("CLAUDECODE", "CLAUDE_CODE_", "CLAUDE_PID", "CLAUDE_AGENT_SDK", "CLAUDE_EFFORT", "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN")
+    return {k: v for k, v in os.environ.items() if not k.startswith(drop)}
+
+
+def write_summary(facts, binary=None):
+    '''
+    The summary by Claude through the Claude Code CLI (headless, your Claude login): (text, info).
+    Raises RuntimeError with a readable message (no CLI, not logged in, usage limits, ...).
+    '''
+    binary = binary or find_claude_cli()
+    if not binary:
+        raise RuntimeError("No Claude Code CLI found. Install the Claude Code extension in VS Code (or the CLI), or set "
+                           "MSHGEN_CLAUDE_BIN to the `claude` binary.")
+    cmd = [binary, "-p", "--model", MODEL, "--effort", "high", "--output-format", "json", "--tools", "",
+           "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--system-prompt", SYSTEM]
+    work = tempfile.mkdtemp(prefix="mshgen_ai_")             # empty folder: no project files or instructions
+    try:
+        proc = subprocess.run(cmd, input="Facts of the mesh (JSON):\n\n" + json.dumps(facts, indent=1),
+                              capture_output=True, text=True, cwd=work, env=_cli_env(), timeout=CLI_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("Claude Code did not answer within {} s.".format(CLI_TIMEOUT)) from e
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    try:
+        out = json.loads(proc.stdout)
+    except ValueError as e:
+        msg = (proc.stderr or proc.stdout or "").strip().splitlines()
+        raise RuntimeError("Claude Code failed: " + (msg[-1] if msg else "exit code {}".format(proc.returncode))) from e
+    if out.get("is_error"):
+        reason = out.get("result") or out.get("api_error") or "error"
+        if "login" in reason.lower() or out.get("api_error_status") == 401:
+            reason += " (log in once in the Claude Code extension in VS Code, or run `claude` and /login)"
+        raise RuntimeError("Claude Code: " + reason)
+    text = (out.get("result") or "").strip()
+    if not text:
+        raise RuntimeError("Claude Code returned no text.")
+    if not text.endswith(ENDING):
+        text = text.rstrip() + "\n\n" + ENDING
+    u = out.get("usage") or {}
+    models = list((out.get("modelUsage") or {}).keys())
+    info = {"model": models[0] if models else MODEL, "via": "Claude Code",
+            "input tokens": int(u.get("input_tokens", 0)) + int(u.get("cache_read_input_tokens", 0))
+            + int(u.get("cache_creation_input_tokens", 0)),
+            "output tokens": int(u.get("output_tokens", 0)),
+            "cost (USD, counted towards your Claude plan)": out.get("total_cost_usd")}
+    return text, info
+
+
+def save(folder, text, info):
+    with open(os.path.join(folder, SUMMARY_FILE), "w") as f:
+        f.write("<!-- {} -->\n".format(json.dumps(info)) + text + "\n")
+
+
+def load(folder):
+    '''(text, info, modified time) of the saved summary, or None.'''
+    p = os.path.join(folder, SUMMARY_FILE)
+    if not os.path.isfile(p):
+        return None
+    raw = open(p).read()
+    info = {}
+    if raw.startswith("<!-- "):
+        head, _, raw = raw.partition(" -->\n")
+        try:
+            info = json.loads(head[5:])
+        except ValueError:
+            info = {}
+    return raw.strip(), info, os.path.getmtime(p)

@@ -286,3 +286,16 @@ warnings and the estimated cell count.
   (it was 1 uniform cell: large cells inside the extension of the wing). Edge plot next to the edges table.
 - Beyond the tip the quality search includes the blocks inside the airfoil contour (tip slice, weight 0.5), with e08
   and grad1 of e03-e07 as variables against the fit of the chordwise cells; e08 matched at both ends.
+
+## Step 5: flagged cells and AI summary (24.11.2026)
+
+- Allrun.pre: checkMesh writes the quality fields (nonOrthoAngle, skewness, aspectRatio, wallDistance) and
+  postProcess the cell centres; no mshGen plots any more (images: ParaView views only).
+- Step 5 shows, next to the checkMesh summary, the cells and faces of checkMesh's sets (failed / warning) and the
+  lower-quality cells (non-orthogonality 50-70 deg, skewness 2-4) in a table and a top and side view
+  (`core/meshquality.py`); older builds: "Analyse the mesh quality" (`runner.run_quality`). The y+ and patch tables
+  are gone.
+- AI summary (`core/aisummary.py`): technical facts (no names or paths) to Claude (claude-opus-5-5, effort high)
+  through the Claude Code CLI of the VS Code extension with the user's login (no API key, no SDK), five sections
+  and a fixed closing sentence, saved as ai_summary.md. Test: tests/test_m9.py.
+
