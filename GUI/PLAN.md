@@ -224,6 +224,8 @@ warnings and the estimated cell count.
    Optimiser: adjusts vertex positions, gradings and counts (within limits) to reduce the largest
    size jump, aspect ratio and skewness at a fixed cell count, using the fast Python metrics and
    confirming with checkMesh at the end.
+6. **Test run** (added 24.11.2026): a short simpleFoam run on the mesh with live convergence, y+, pressure
+   distribution, contours and tip vortex, and an AI review of the solution and the effects of the mesh.
 
 ## Milestones
 
@@ -298,4 +300,32 @@ warnings and the estimated cell count.
 - AI summary (`core/aisummary.py`): technical facts (no names or paths) to Claude (claude-opus-5-5, effort high)
   through the Claude Code CLI of the VS Code extension with the user's login (no API key, no SDK), five sections
   and a fixed closing sentence, saved as ai_summary.md. Test: tests/test_m9.py.
+
+## Step 6: test run with OpenFOAM (24.11.2026)
+
+- Inputs (case.json `simulation`): cores, alpha, turbulence model (kOmegaSST, SpalartAllmaras, realizableKE,
+  laminar), iterations, section planes; V is `flow.U` (one value for y+ and the run). Defaults in a table.
+- `core/simulation.py` writes `<case>/run/` (polyMesh linked, rewritten for every run): simpleFoam, freestream
+  BCs, Spalding wall function (any y+), symmetry at root and far field, linearUpwind for U, upwind for the
+  turbulence, residual control; function objects forceCoeffs (every iteration), yPlus, wallShearStress, vorticity,
+  Q, raw surfaces (wall, section planes, two crossflow planes behind the most downstream TE). Allrun: decomposePar,
+  mpirun simpleFoam, reconstructPar -latestTime. Stop: stopAt writeNow (runTimeModifiable), then kill.
+- Live in the GUI (read incrementally): residuals, Cl/Cd/Cm, progress; at every write: y+ (solution vs the step 4
+  prediction and the target), Cp at a section, reversed flow (wall shear against the flow behind the nose x/c > 0.05,
+  where the attached flow runs forward from the stagnation point; chord- and span-weighted), Cp on the wing from
+  above, section contours of Cp and |U|/V, tip vortex (omega_x c_tip/V with in-plane vectors).
+- Wall faces -> x/c and side: one surface per wall patch (wingUp/wingDown give the side). Without split, the local
+  section from the planform at the face's y, corrected per row of faces (scaled to its LE/TE faces, then a z offset
+  a + b x/c fitted where the airfoil is thick): between slices the mesh is blockMesh's interpolation of the slice
+  sections, up to 0.6 % of the chord off the planform (MegAWES, 4 slices), more than the thickness near the TE. The
+  camber line alone put 148 of 9,936 faces on the wrong side, the corrected geometry 1.
+- Cutting planes: OpenFOAM snaps cut points to mesh points; in the long wake cells up to 8 mm off the plane.
+- Machine load: a 34-core test run next to a 29-process Fluent job (63 processes, 36 cores) took 2 minutes per
+  iteration. Step 6 shows the busy processes (procs_running of /proc/stat, median of the last samples; MPI processes
+  count while they wait, CPU usage cannot show this) and warns before a run that would share cores (second click
+  runs anyway).
+- AI review (`aisummary.write_review`): facts of the run and of the mesh (step 5 facts) to Claude through the Claude
+  Code CLI; four sections (convergence, plausibility, effects of the mesh, recommendations); `run/ai_review.md`.
+- Developed and tested on one COARSE mesh only (MegAWES, 1.43 million cells; 300 iterations on 16 cores in about
+  5 minutes). Test: tests/test_m10.py (one built case; default a new NACA0012 wing).
 

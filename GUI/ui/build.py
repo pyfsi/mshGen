@@ -417,6 +417,9 @@ class BuildStep:
         if problems:
             self.app.notify("error", "Cannot build: " + "; ".join(problems))
             return
+        if self.app.simulation.running():
+            self.app.notify("warning", "A test run (step 6) uses the mesh of this case: stop it first")
+            return
         self.build_btn.disabled = True
         self.app.save(then=self.start_build)
 

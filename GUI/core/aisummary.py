@@ -50,6 +50,33 @@ Then one short paragraph that motivates the engineer to run the simulations. Use
 keep the whole summary under about 600 words, and do not add other headings or a title. End the summary with this
 sentence, exactly as written and on its own line: """ + ENDING
 
+REVIEW_FILE = "ai_review.md"
+REVIEW_SYSTEM = """You review the result of a CFD test run for a CFD engineer and judge how the mesh affected it.
+
+The run is a steady incompressible RANS simulation (OpenFOAM simpleFoam, SIMPLE) on a structured C-grid made with
+mshGen: 27 blocks per spanwise layer, 13 inside the airfoil contour (used only beyond the wing tip) and 14 around the
+airfoil; 3D cases are half wings with a symmetry plane at the root. The facts you get: the settings of the run, its
+convergence (residuals, force coefficients over the iterations), y+ from the solution next to the prediction made
+while meshing, pressure and friction along the airfoil at a few spanwise sections, the share of the wall with
+reversed flow, the tip vortex in crossflow planes, and the facts of the mesh (checkMesh, flagged cells). Use only
+these facts; if something you would need is not in them, say that it is not known instead of guessing. Give numbers.
+It is a short test run on a coarse mesh: judge it as such.
+
+Write Markdown with exactly these sections, in this order, each as a level-3 heading:
+### Convergence
+(did it converge: residual drop, force coefficients settled or still drifting, what limits it)
+### Plausibility of the solution
+(lift, drag, pressure distribution, separation, tip vortex: what is expected for this airfoil, Reynolds number and
+angle of attack, and what looks wrong)
+### Effects of the mesh on the solution and the convergence
+(y+ against the prediction and the wall treatment, resolution at the leading and trailing edge, in the wake and at
+the tip, the flagged and lower-quality cells, the domain size)
+### Recommendations
+(concrete changes to the mesh, the set-up or the run, most important first)
+
+Use bullet points inside the sections, keep the whole review under about 500 words, and do not add other headings
+or a title."""
+
 
 def _planform(case):
     st = np.asarray(case.wing_stations, dtype=float)
@@ -171,21 +198,21 @@ def _cli_env():
     return {k: v for k, v in os.environ.items() if not k.startswith(drop)}
 
 
-def write_summary(facts, binary=None):
+def _run_cli(system, prompt, binary=None):
     '''
-    The summary by Claude through the Claude Code CLI (headless, your Claude login): (text, info).
-    Raises RuntimeError with a readable message (no CLI, not logged in, usage limits, ...).
+    One headless Claude Code call (your Claude login): (text, info). No tools, no session kept, in an empty temporary
+    folder. Raises RuntimeError with a readable message (no CLI, not logged in, usage limits, ...).
     '''
     binary = binary or find_claude_cli()
     if not binary:
         raise RuntimeError("No Claude Code CLI found. Install the Claude Code extension in VS Code (or the CLI), or set "
                            "MSHGEN_CLAUDE_BIN to the `claude` binary.")
     cmd = [binary, "-p", "--model", MODEL, "--effort", "high", "--output-format", "json", "--tools", "",
-           "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--system-prompt", SYSTEM]
+           "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--system-prompt", system]
     work = tempfile.mkdtemp(prefix="mshgen_ai_")             # empty folder: no project files or instructions
     try:
-        proc = subprocess.run(cmd, input="Facts of the mesh (JSON):\n\n" + json.dumps(facts, indent=1),
-                              capture_output=True, text=True, cwd=work, env=_cli_env(), timeout=CLI_TIMEOUT)
+        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=work, env=_cli_env(),
+                              timeout=CLI_TIMEOUT)
     except subprocess.TimeoutExpired as e:
         raise RuntimeError("Claude Code did not answer within {} s.".format(CLI_TIMEOUT)) from e
     finally:
@@ -203,8 +230,6 @@ def write_summary(facts, binary=None):
     text = (out.get("result") or "").strip()
     if not text:
         raise RuntimeError("Claude Code returned no text.")
-    if not text.endswith(ENDING):
-        text = text.rstrip() + "\n\n" + ENDING
     u = out.get("usage") or {}
     models = list((out.get("modelUsage") or {}).keys())
     info = {"model": models[0] if models else MODEL, "via": "Claude Code",
@@ -215,14 +240,28 @@ def write_summary(facts, binary=None):
     return text, info
 
 
-def save(folder, text, info):
-    with open(os.path.join(folder, SUMMARY_FILE), "w") as f:
+def write_summary(facts, binary=None):
+    '''The summary of the mesh by Claude (Claude Code CLI, your login): (text, info).'''
+    text, info = _run_cli(SYSTEM, "Facts of the mesh (JSON):\n\n" + json.dumps(facts, indent=1), binary)
+    if not text.endswith(ENDING):
+        text = text.rstrip() + "\n\n" + ENDING
+    return text, info
+
+
+def write_review(facts, binary=None):
+    '''The review of a test run (step 6) by Claude (Claude Code CLI, your login): (text, info).'''
+    return _run_cli(REVIEW_SYSTEM, "Facts of the test run and its mesh (JSON):\n\n" + json.dumps(facts, indent=1),
+                    binary)
+
+
+def save(folder, text, info, name=SUMMARY_FILE):
+    with open(os.path.join(folder, name), "w") as f:
         f.write("<!-- {} -->\n".format(json.dumps(info)) + text + "\n")
 
 
-def load(folder):
-    '''(text, info, modified time) of the saved summary, or None.'''
-    p = os.path.join(folder, SUMMARY_FILE)
+def load(folder, name=SUMMARY_FILE):
+    '''(text, info, modified time) of a saved summary or review, or None.'''
+    p = os.path.join(folder, name)
     if not os.path.isfile(p):
         return None
     raw = open(p).read()

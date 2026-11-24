@@ -13,8 +13,10 @@ Status: **M6** (all milestones of the plan). All steps are editable:
   optimiser that computes all cells and gradings from the targets, editable tables, and a 2D mesh
   preview identical to blockMesh's.
 
-The build step runs the case with a live log and shows the checkMesh summary, y+ measured on the
-mesh, the Fluent zones, a 3D view of the walls and the images.
+The build step runs the case with a live log and shows the checkMesh summary, the flagged cells, the
+Fluent zones, an AI summary of the mesh, a 3D view of the walls and the images. The test run (step
+6) runs OpenFOAM's simpleFoam on the mesh and shows the convergence, y+, the pressure distribution,
+contours and the tip vortex while it runs, with an AI review of the solution.
 
 ## Tutorial video
 
@@ -49,7 +51,7 @@ mshGen/GUI/run_gui.sh            # optional: port, default 5006
    readable only by you.
 2. In VS Code (Remote), the port is forwarded automatically (PORTS tab). Open the URL in your
    local browser. `/app?case=MegAWES_wing&step=3b` opens a given case and step directly
-   (steps 1, 2, 3a, 3b, 4, 5).
+   (steps 1, 2, 3a, 3b, 4, 5, 6).
 3. The server listens on this machine only (127.0.0.1). The password keeps other users logged in on
    the same machine out.
 
@@ -57,11 +59,11 @@ Stop it with Ctrl+C.
 
 ### AI summary
 
-The AI summary of step 5 is written by Claude (`claude-opus-5-5`) through **Claude Code**: the GUI runs the
-CLI of the Claude Code extension in VS Code headless (`claude -p`) with your Claude login. No API key and no
-package are needed, and there is no extra bill: it counts towards your Claude plan, like a question in
-Claude Code (about 3,000 input and 3,000 output tokens per summary). The CLI runs without tools, keeps no
-session, and starts in an empty temporary folder.
+The AI summary of step 5 and the AI review of step 6 are written by Claude (`claude-opus-5-5`) through
+**Claude Code**: the GUI runs the CLI of the Claude Code extension in VS Code headless (`claude -p`) with your
+Claude login. No API key and no package are needed, and there is no extra bill: it counts towards your Claude
+plan, like a question in Claude Code (about 3,000 input and 3,000 output tokens per summary, about twice the
+input for a review). The CLI runs without tools, keeps no session, and starts in an empty temporary folder.
 
 The GUI finds the CLI in the VS Code extension (`~/.vscode*/extensions/anthropic.claude-code-*`), as `claude`
 on PATH, or at `MSHGEN_CLAUDE_BIN`. If the CLI is not logged in, log in once in the Claude Code extension.
@@ -219,6 +221,50 @@ the vertices are edited, shows the same panel in full:
 - **3D view of the wall patches**, with cell edges (drag to rotate, or an image, see
   [3D views and WebGL](#3d-views-and-webgl)), and the images.
 
+**6. Test run** (OpenFOAM simpleFoam on the mesh of the last build; use a COARSE mesh for quick tests:
+about 1 s per iteration on 16 cores for 1.4 million cells)
+- **Inputs**: cores (slider up to the cores of this machine), free-stream velocity V (the same as U in
+  step 4), angle of attack (in the x-z plane), turbulence model (k-ω SST, Spalart-Allmaras, realizable
+  k-ε, laminar), iterations, and the spanwise section planes (default 25/50/75/95 % of the half-span).
+- **Machine load** (under the cores, live): the busy processes on this machine (all users, e.g. a
+  Fluent job). If the chosen cores plus the busy processes exceed the cores of the machine, a warning
+  says how many cores are free, and **Save and run** asks for a second click (**Run anyway**). Sharing
+  cores slows a parallel run far more than in proportion, because its processes wait for each other at
+  every step: next to a 29-process Fluent job, a 34-core test run took 2 minutes per iteration.
+- **Settings of the test run**: a table of everything else: steady incompressible RANS (SIMPLE),
+  freestream velocity/pressure at the inlet and outlet, no-slip walls with Spalding's wall function
+  (any y+), symmetry at the root and the far field, 0.5 % inflow turbulence with ν_t/ν = 10,
+  linearUpwind for U and upwind for the turbulence, force coefficients on the half wing (area, mean
+  aerodynamic chord, quarter chord at the root), the write interval (every iterations/10, at least 20).
+- **Save and run**: saves the case and writes `run/` in the case folder (the mesh is linked, earlier
+  results are removed), then runs `run/Allrun`: decomposePar, `mpirun simpleFoam -parallel`,
+  reconstructPar of the last time. **Stop** asks simpleFoam to write the current iteration and end
+  (clicked again after a minute, it kills the run). The progress line shows the iteration, the time per
+  iteration and the time left; the log follows the solver. Rebuilding the mesh in step 5 is refused
+  while a run uses it; results of an older mesh are marked.
+- **Convergence** (live): the initial residuals of all equations (log scale), and Cl, Cd and Cm (pitch)
+  over the iterations (hover for values).
+- The results below are read at every write while the solver runs:
+  - **y+**: per wall patch, the solution's min / average / max next to the prediction of step 4 (flat
+    plate, local chord) and the target; y+ along the airfoil at the selected section.
+  - **Pressure distribution**: Cp along the upper and lower side at a section (the row of wall faces
+    nearest to the section plane; red x: reversed flow at the wall). The side of a face comes from the
+    patch (wingUp / wingDown) or, for a wing surface that is not split, from the geometry: the local
+    section, corrected per row of faces for blockMesh's interpolation between the slices. The share of the upper and lower
+    side with reversed flow (chord- and span-weighted; the nose x/c < 0.05 is left out, where the
+    attached flow runs forward from the stagnation point), and the wing seen from above: Cp on both
+    sides, reversed flow dotted, the section planes dashed.
+  - **Contours**: Cp and |U|/V in the section plane around the airfoil.
+  - **Tip vortex** (3D): streamwise vorticity ω_x·c_tip/V with the in-plane velocity in two crossflow
+    planes, 0.5 and 3 tip chords behind the most downstream trailing edge.
+- **AI review of the solution**: Claude reviews the convergence, the plausibility of the solution, the
+  effects of the mesh on the solution and the convergence, and gives recommendations. **Write AI review**
+  sends technical facts of the run and its mesh (the set-up, residuals, force coefficients, y+ against
+  the prediction, Cp at the sections with the stagnation point, suction peak and the cell lengths at
+  the LE and TE, reversed flow, the tip vortex, the mesh facts of step 5; no case name, user name or
+  paths) through Claude Code with your login (see [AI summary](#ai-summary)). The
+  facts can be opened below the button; the review is saved as `run/ai_review.md`.
+
 ## Case folder
 
 ```
@@ -235,6 +281,9 @@ cases/<case>/
   output_files/ constant/polyMesh/ fluentInterface/ images/ log.*     generated
   constant/C, constant/nonOrthoAngle, skewness, aspectRatio, wallDistance   generated (checkMesh, step 5)
   ai_summary.md        AI summary of the last build (step 5, optional)
+  run/                 test run (step 6): 0/, constant/ (polyMesh linked to ../../constant/polyMesh),
+                       system/, Allrun, settings.json, log.*, processor*/, postProcessing/ (forceCoeffs,
+                       yPlus, surfaces), the last two written times, ai_review.md (optional)
 ```
 
 Without the GUI: `./Allrun.pre [--images]` in the case folder rebuilds everything from these files.
@@ -261,6 +310,23 @@ python GUI/tests/test_m0.py              # about 2 minutes, no OpenFOAM needed
 python GUI/tests/test_m1.py [--openfoam] # with --openfoam about 4 minutes (blockMesh + checkMesh)
 python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
 ```
+
+**test_m10** (`python GUI/tests/test_m10.py [<built case folder>] [--cores N] [--live] [--load-only]`,
+needs OpenFOAM): step 6 on one built case: by default a new NACA0012 wing built in a temporary folder
+(about 3 minutes); or the mesh of a case folder (e.g. a COARSE mesh), linked and only read.
+- The log reader: residuals (the first solve of p per iteration), errors, the end, lines in two parts.
+- The machine load: busy processes measured (with free cores: 6 busy loops for a second), the warning,
+  and Run on a busy machine (a stand-in app: the first click warns, the second runs; back to normal
+  when the load drops). `--load-only` stops after this check (no simulation).
+- write_run: the fields per patch, the function objects, the reference values, the wake planes behind
+  the most downstream trailing edge.
+- Allrun with a stop request after 6 iterations: the solver writes and ends, reconstructPar, exit code 0.
+- The readers: residuals and force coefficients every iteration, y+ per wall patch, the surfaces of the
+  write (each wall patch, sections, wake planes), Cp along the sections, reversed flow, the tip vortex.
+- For a split wing: the upper / lower side from the geometry agrees with the patches (MegAWES COARSE:
+  1 of 9,936 faces differs, the trailing-edge face).
+- The facts for the AI review hold no case name, folder or user name; a failing CLI gives a readable
+  message. With --live: a review with the four sections.
 
 **test_m9** (`python GUI/tests/test_m9.py [--live]`, about 5 minutes, needs OpenFOAM): step 5 on a
 new NACA0012 wing.
@@ -351,7 +417,10 @@ earlier quality optimiser at a fixed cell count (`core/quality.py`, no longer in
   - `model.py`: mshGen in memory
   - `preview.py`: 2D slice mesh (blockMesh's interpolation), cell metrics
   - `meshquality.py`: cells and faces of a built mesh that fail checkMesh or have a lower quality
-  - `aisummary.py`: facts of a built mesh and its AI summary (Claude through the Claude Code CLI)
+  - `aisummary.py`: facts of a built mesh, its AI summary and the AI review of a test run (Claude
+    through the Claude Code CLI)
+  - `simulation.py`: test run of step 6 (simpleFoam set-up, Allrun, log and result readers, facts for
+    the AI review)
   - `meshopt.py`: mesh optimiser of step 4 ([docs/mesh_optimiser.md](docs/mesh_optimiser.md)),
     analysis of every slice
   - `sizing.py`: geometric series, y+, sizing functions
@@ -369,5 +438,6 @@ earlier quality optimiser at a fixed cell count (`core/quality.py`, no longer in
   - `step1_geometry.py`, `step2_domain.py`, `step3_blocks.py` (3a slicing, 3b blocking)
   - `step4_meshing.py`
   - `build.py` (step 5)
+  - `step6_simulation.py` (step 6)
 - `templates/`: `generate_mesh.py`, `Allrun.pre`, OpenFOAM files
 - `tests/`

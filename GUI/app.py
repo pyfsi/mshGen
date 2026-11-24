@@ -8,6 +8,7 @@ The app holds the case being edited (in memory); "Save" writes case.json and all
   3a. Spanwise slicing, 3b. Airfoil blocking   ui/step3_blocks.py
   4. Meshing                          ui/step4_meshing.py
   5. Build & check                    ui/build.py
+  6. Test run (OpenFOAM simpleFoam)   ui/step6_simulation.py
 See GUI/PLAN.md.
 '''
 import json
@@ -28,6 +29,7 @@ from ui.step4_meshing import MeshingStep  # noqa: E402
 from ui.step1_geometry import GeometryStep  # noqa: E402
 from ui.step2_domain import DomainStep  # noqa: E402
 from ui.step3_blocks import BlockingStep, SlicingStep  # noqa: E402
+from ui.step6_simulation import SimulationStep  # noqa: E402
 from ui.vertexpanel import VertexPanel  # noqa: E402
 from ui.view3d import View3DSettings  # noqa: E402
 
@@ -62,13 +64,14 @@ class App:
 
         self._layout_cache = (None, None)
         self._model_cache = (None, None)
-        # Optional URL parameters: /app?case=<name>&step=<1|2|3a|3b|4|5>&view3d=<auto|interactive|image>
+        # Optional URL parameters: /app?case=<name>&step=<1|2|3a|3b|4|5|6>&view3d=<auto|interactive|image>
         args = pn.state.session_args or {}
         self.view3d = View3DSettings(self, initial=args.get("view3d", [b"auto"])[0].decode())
         self.vertex_panel = VertexPanel(self)
         self.slicing, self.blocking = SlicingStep(self), BlockingStep(self)
-        self.meshing, self.build = MeshingStep(self), BuildStep(self)
-        self.steps = [GeometryStep(self), DomainStep(self), self.slicing, self.blocking, self.meshing, self.build]
+        self.meshing, self.build, self.simulation = MeshingStep(self), BuildStep(self), SimulationStep(self)
+        self.steps = [GeometryStep(self), DomainStep(self), self.slicing, self.blocking, self.meshing, self.build,
+                      self.simulation]
         self.step = pn.widgets.RadioBoxGroup(name="Step", options=[s.title for s in self.steps],
                                              value=self.steps[0].title)
         self.main = pn.Column()
@@ -125,6 +128,7 @@ class App:
             done(None if err else fut.result(), err)
         self.build.poll()
         self.meshing.poll()
+        self.simulation.poll()
 
     def set_airfoil_file(self, filename):
         self.airfoil_file = filename

@@ -19,6 +19,7 @@ cases/*/fluentInterface/
 cases/*/images/
 cases/*/log.*
 cases/*/*.foam
+cases/*/run/
 
 
 # AP2 files remain confidential and are not tracked in the repository.

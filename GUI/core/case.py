@@ -105,6 +105,16 @@ class Options:
 
 
 @dataclass
+class Simulation:
+    '''Test run of step 6 (core/simulation.py); the free-stream velocity is flow.U.'''
+    cores: int = 8
+    alpha: float = 4.0                      # angle of attack (deg), in the x-z plane
+    turbulence: str = "kOmegaSST"           # kOmegaSST | SpalartAllmaras | realizableKE | laminar
+    iterations: int = 500
+    sections: Optional[List[float]] = None  # spanwise section planes (m); None: 25/50/75/95 % of the half-span
+
+
+@dataclass
 class Environment:
     python_module: str = "Anaconda3-python/2023.09-0"
     openfoam_module: str = "OpenFOAM/v2112-foss-2021b"
@@ -125,6 +135,7 @@ class Case:
     blocks: Blocks = field(default_factory=Blocks)
     meshing: Meshing = field(default_factory=Meshing)
     options: Options = field(default_factory=Options)
+    simulation: Simulation = field(default_factory=Simulation)
     environment: Environment = field(default_factory=Environment)
     imported_from: str = ""
     schema_version: int = SCHEMA_VERSION
