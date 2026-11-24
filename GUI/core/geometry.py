@@ -2,10 +2,11 @@
 geometry.py: changes to the geometry of a case and what follows from them
 
 - Block vertices: mshGen's default vertex positions depend on the airfoil, the root section (chord,
-  twist, dx, dz), COG, mesh_scale and mesh_level (Mesh.generate_default only uses the root section).
-  defaults_key() describes that input; when it changes, recompute_vertices() asks mshGen for new
-  defaults. The edge resolution/grading is kept unless the airfoil, mesh_scale or mesh_level changed
-  (only those select mshGen's default resolution).
+  twist, dx, dz), COG and mesh_scale (Mesh.generate_default only uses the root section; the vertices are
+  the same for every mesh_level). defaults_key() describes that input; when it changes,
+  recompute_vertices() asks mshGen for new defaults. The edge resolution/grading is kept unless the
+  airfoil or mesh_scale changed. mesh_level only names the settings files and selects the presets of the
+  mesh optimiser (step 4); it does not outdate the vertices.
 - Span: when the half-span changes, the slice locations can be scaled with it.
 - 2D/3D: a 2D case has slices [0, 1] and one cell; the 3D slices are kept to switch back.
 - New wing cases from scratch.
@@ -26,31 +27,40 @@ def defaults_key(case, airfoil_file):
             "mesh_scale": float(case.domain.mesh_scale), "mesh_level": case.domain.mesh_level}
 
 
+def _without_level(key):
+    return {k: v for k, v in (key or {}).items() if k != "mesh_level"}
+
+
 def vertex_state(case, airfoil_file):
     '''"ok" (defaults for this geometry), "outdated" (defaults for another geometry) or "custom".'''
     if case.blocks.vertex_source != "mshgen-defaults":
         return "custom"
-    return "ok" if case.blocks.defaults_key == defaults_key(case, airfoil_file) else "outdated"
+    same = _without_level(case.blocks.defaults_key) == _without_level(defaults_key(case, airfoil_file))
+    return "ok" if same else "outdated"
 
 
 def edge_defaults_changed(case):
-    '''True if airfoil, mesh_scale or mesh_level differ from the last defaults (or there were none).'''
+    '''True if airfoil or mesh_scale differ from the last defaults (or there were none).'''
     k = case.blocks.defaults_key
     if not k:
         return True
-    return (k.get("airfoil"), k.get("mesh_scale"), k.get("mesh_level")) != (
-        case.airfoil.name, float(case.domain.mesh_scale), case.domain.mesh_level)
+    return (k.get("airfoil"), k.get("mesh_scale")) != (case.airfoil.name, float(case.domain.mesh_scale))
+
+
+def defaults_level(case):
+    '''Level used to ask mshGen for defaults: the case's level if mshGen has it for this airfoil and R/c, else
+    COARSE (or the first available). The default vertices do not depend on the level.'''
+    levels = airfoils.default_levels(case.airfoil.name, case.domain.mesh_scale)[1]
+    if case.domain.mesh_level in levels:
+        return case.domain.mesh_level
+    return "COARSE" if "COARSE" in levels else levels[0]
 
 
 def check_level(case):
+    '''Raises ValueError if mshGen's default vertices cannot be used for the airfoil.'''
     if not airfoils.has_defaults(case.airfoil.name):
         raise ValueError("mshGen's default block vertices do not work for " + case.airfoil.name
                          + " (crossing blocks); use its example cases, which have their own vertices")
-    used, levels, note = airfoils.default_levels(case.airfoil.name, case.domain.mesh_scale)
-    if case.domain.mesh_level not in levels:
-        raise ValueError("mshGen has no default settings for {} at R = {:g}c with level {} (available: {}; {})".format(
-            case.airfoil.name, used if used else case.domain.mesh_scale, case.domain.mesh_level,
-            ", ".join(levels), note))
 
 
 def mshgen_defaults(case, airfoil_file):
@@ -65,7 +75,7 @@ def mshgen_defaults(case, airfoil_file):
         # Slices and layers do not influence the defaults (generate_default uses the root section only)
         return mshgen_io.generate_defaults(case.airfoil.name, airfoil_file, case.wing.name, wing_file, case.dim,
                                            [float(v) for v in case.cog], [0.0, 1.0], [1], [1.0], None,
-                                           float(case.domain.mesh_scale), case.domain.mesh_level)
+                                           float(case.domain.mesh_scale), defaults_level(case))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -73,7 +83,7 @@ def mshgen_defaults(case, airfoil_file):
 def recompute_vertices(case, airfoil_file, reset_edges=None):
     '''
     Set the block vertices to mshGen's defaults for the current geometry. reset_edges: also take
-    mshGen's default resolution/grading (None: only if airfoil, mesh_scale or mesh_level changed).
+    mshGen's default resolution/grading (None: only if the airfoil or mesh_scale changed).
     Returns True if the edges were reset.
     '''
     if reset_edges is None:

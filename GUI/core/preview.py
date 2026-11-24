@@ -92,8 +92,11 @@ def _curve(edges, a, b):
     return None
 
 
-def slice_mesh(case, airfoil_file, slice_index, mesh=None):
-    '''Blocks of the slice: list of {"block", "P" (nx+1, nz+1, 3)} for the blocks of the adjacent layer.'''
+def slice_mesh(case, airfoil_file, slice_index, mesh=None, blocks=None):
+    '''
+    Blocks of the slice: list of {"block", "P" (nx+1, nz+1, 3)} for the blocks of the adjacent layer (blocks: these
+    block numbers instead of the active ones, e.g. all 27 to draw the layout; inactive blocks get straight edges).
+    '''
     mesh = mesh or mshgen_mesh(case, airfoil_file, upto="edges")
     n_layers = mesh.N_layers
     layer = min(slice_index, n_layers - 1)
@@ -101,7 +104,7 @@ def slice_mesh(case, airfoil_file, slice_index, mesh=None):
     coords = np.array([v.coord for v in mesh.vertices], dtype=float)
     edges = active_edges(mesh, slice_index)
     out = []
-    for k in active_blocks(case)[layer]:
+    for k in (active_blocks(case)[layer] if blocks is None else blocks):
         blk = mesh.blocks[layer * N_BLOCKS + k]
         v = blk.vertices
         # curved edges of this slice (edges of the other face do not contribute to this face)

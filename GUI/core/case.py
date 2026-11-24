@@ -92,6 +92,8 @@ class Meshing:
     layer_grading: List[float] = field(default_factory=lambda: [1.0])
     # Edge parameters e00-e10: {name: [cells, grad1 (airfoil side), grad2 (outer side)]}
     edges: dict = field(default_factory=dict)
+    # Targets of the mesh optimiser (core/meshopt.py), None: the preset of domain.mesh_level
+    targets: Optional[dict] = None
 
 
 @dataclass

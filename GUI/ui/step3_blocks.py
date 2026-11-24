@@ -55,13 +55,17 @@ def editors_readonly(columns):
 
 
 class SliceTopView:
-    '''Small top view of the half wing (flow downwards) with all slices and the selected one highlighted.'''
+    '''Small top view of the half wing (flow downwards) with all slices and the selected one highlighted;
+    optionally the spanwise cell faces (thin lines, step 4).'''
 
-    def __init__(self):
-        f = figure(width=PLOT_W, height=200, tools="", toolbar_location=None)
+    def __init__(self, height=200, tools=""):
+        f = figure(width=PLOT_W, height=height, tools=tools, toolbar_location=None if not tools else "right")
+        f.toolbar.logo = None
         f.xaxis.axis_label, f.yaxis.axis_label = "y (m)", "x (m)"
+        self.src_faces = ColumnDataSource(dict(ys=[], xs=[]))
+        f.multi_line("ys", "xs", source=self.src_faces, color="#4292c6", line_width=0.6, line_alpha=0.7)
         self.src_wing = ColumnDataSource(dict(y=[], x=[]))
-        f.patch("y", "x", source=self.src_wing, fill_color="#d9d9d9", line_color="#636363")
+        f.patch("y", "x", source=self.src_wing, fill_color="#d9d9d9", line_color="#636363", fill_alpha=0.8)
         self.src_slices = ColumnDataSource(dict(ys=[], xs=[]))
         f.multi_line("ys", "xs", source=self.src_slices, color="#969696", line_dash="dashed")
         self.src_sel = ColumnDataSource(dict(y=[], x=[]))
@@ -73,7 +77,8 @@ class SliceTopView:
         self.figure = f
         self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
 
-    def update(self, case, sl):
+    def update(self, case, sl, faces=None):
+        '''faces: spanwise positions of the cell faces to draw (None: none).'''
         st = case.wing_stations or NO_STATIONS
         b2 = case.half_span or 1.0
         s = case.blocks.slice_locations
@@ -86,7 +91,10 @@ class SliceTopView:
         self.src_slices.data = dict(ys=[[y, y] for y in s], xs=[[lo, hi]] * len(s))
         self.src_sel.data = dict(y=[s[sl], s[sl]], x=[lo, hi])
         self.src_lab.data = dict(y=list(s), x=[lo] * len(s), text=[str(k) for k in range(len(s))])
-        self.figure.title.text = "Top view: slice {} at y = {:.4g} m (red)".format(sl, s[sl])
+        f = [] if faces is None else list(faces)
+        self.src_faces.data = dict(ys=[[y, y] for y in f], xs=[[lo, hi]] * len(f))
+        self.figure.title.text = "Top view: slice {} at y = {:.4g} m (red){}".format(
+            sl, s[sl], "; blue: spanwise cell faces ({})".format(len(f) - 1) if f else "")
 
 
 class BlockPlot:

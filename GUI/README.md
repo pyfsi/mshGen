@@ -9,12 +9,12 @@ Status: **M6** (all milestones of the plan). All steps are editable:
 - domain: R/c, far field;
 - spanwise slicing (3a): slices, aileron cut-out layers, patch `extra`;
 - airfoil blocking (3b): airfoil and exterior vertices (tables or dragged), wingUp/wingDown;
-- meshing: level, flow conditions, cells and gradings, with sizing helpers (y+, chordwise, wake, spanwise, cell budget) and
-  a 2D mesh preview identical to blockMesh's.
+- meshing: mesh level and targets (y+, cell ranges, growth, cell budget), flow conditions, a mesh
+  optimiser that computes all cells and gradings from the targets, editable tables, and a 2D mesh
+  preview identical to blockMesh's.
 
 The build step runs the case with a live log and shows the checkMesh summary, y+ measured on the
-mesh, the Fluent zones, a 3D view of the walls and the images. A quality optimiser (step 4)
-improves non-orthogonality, skewness and size jumps at a fixed cell count.
+mesh, the Fluent zones, a 3D view of the walls and the images.
 
 ## Tutorial video
 
@@ -99,7 +99,7 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
   stay upstream of the near-wake line (see `../LIMITATIONS.md` item 7).
 
 **2. Domain** (editable)
-- C-grid radius R/c (the mshGen levels available for it are listed).
+- C-grid radius R/c (the block vertices follow it; optimise the cells again in step 4).
 - Far field (`symTip`) position.
 - Plots: the root plane with the C-domain and the root section, and the domain seen from above
   with the planform and patches. (The exterior block vertices and the slices are in step 3.)
@@ -141,44 +141,47 @@ the vertices are edited, shows the same panel in full:
 - Block check: errors for folded blocks, warnings for skewed ones (corners below 10° or above 170°).
 
 **4. Meshing** (editable)
-- **Starting resolution**: mshGen's level (`mesh_level`, e.g. COARSE); only levels mshGen has for
-  this airfoil and R/c are offered. Choosing one loads its default cells and gradings (and the
-  default block vertices, unless they are custom).
-- **Flow conditions** U and ν: Reynolds number, plus a first estimate of the wall-normal first cell
-  and its y+; the helpers below use them.
-- **Helpers**: each computes a proposal, shows the old → new values and the predicted result
-  (measured on the block mesh, next to the current values), and is applied with **Apply proposal**.
-  The inputs start from the current mesh.
-  - **Wall y+**: target y+ at the first cell centre (median or maximum over the wing), keeping the
-    wall-normal cells or limiting the growth ratio. Sets e00; e09/e10 are scaled with it.
-  - **Chordwise**: cell size at the TE and the LE, largest cell and growth ratio. Sets e03–e07.
-  - **Wake**: first wake cell, largest cell and growth ratio. Sets e02 and e01.
-  - **Spanwise**: cell size on the wing, at the tip (this sets the y+ of the tip face) and beyond the
-    tip, plus the growth ratio. Sets cells and grading of every layer, continuous at the slices.
-  - **Cell budget**: scales all counts to a target total, optionally keeping the wall and tip y+.
-  - **Optimise quality**: improves non-orthogonality, skewness and size jumps at a **fixed cell count**
-    (the counts and the wall/tip first cells stay as they are, so y+ does not change). Choose what it
-    may change: chordwise gradings (airfoil side, outer side), wake gradings, spanwise gradings,
-    chordwise divisions, exterior vertices. Also choose the priority (size jumps vs orthogonality) and
-    the number of evaluations (about 0.4 s each).
-    - It measures on the exact block mesh of the root, tip and far-field slices, using checkMesh's
-      definitions in the slice plane.
-    - It accepts only changes that make no quality value worse than now, and shows the progress.
-    - The proposal lists the quality before and after.
-    - Build the mesh (step 5) to confirm the result with checkMesh.
+- **Mesh level** COARSE / MEDIUM / FINE: loads the presets of the targets below. The level also names
+  the settings files; it no longer loads mshGen's default cells.
+- **Targets** (stored in the case, editable): y+ at the first cell centre, chordwise cells per side
+  (min/max), spanwise cells on the wing (min/max), max growth ratio between neighbouring cells, max
+  number of cells. **Reset to the level presets** restores them.
+- **Flow conditions** U and ν (for y+).
+- **Optimise mesh**: computes the cells and gradings of all edges (e00–e10) and of the spanwise layers
+  from the targets, in 0.5–2 minutes, with the progress next to the button.
+  - y+, the counts, the cell budget and the growth inside every edge and layer are constraints.
+  - Leading edge, trailing edge and wake refinement follow from rules: chordwise sizes follow the
+    radius of curvature, the TE cell is as small as the LE cell, the wake starts with the TE cell, the
+    wake line is graded like the wall, spanwise sizes are refined towards the tip.
+  - The outer-side gradings are optimised for non-orthogonality and size jumps on the exact block
+    mesh of the root and tip slices. Beyond the tip the blocks inside the airfoil contour count as
+    well (e08 and the chordwise grad1 become variables, against the fit of the chordwise cells).
+  - A card in the step explains the metrics. **Undo** (under the button) restores the previous cells
+    and gradings; the result table (before / after / target) is in the detailed analysis.
+  - Details: [docs/mesh_optimiser.md](docs/mesh_optimiser.md).
 - **Edges** e00–e10: cells, grad1 (expansion ratio last/first cell on the airfoil side) and grad2
-  (outer side).
-- **Spanwise layers**: cells and grading. The table also shows the first and last cell and the size
-  jump to the next layer, with a warning above 1.3.
-- **Estimated cell count** (exact).
+  (outer side), editable; the plots follow. Next to the table, the **edge plot** shows the block
+  layout of the selected slice with every block edge coloured by its edge parameter and the cell
+  nodes along it (hover for cells and grading; a row selected in the table is highlighted; the
+  blocks inside the airfoil contour, with e08, exist only beyond the tip).
+- **Spanwise layers**: cells and grading, editable. The table also shows the first and last cell and
+  the size jump to the next layer, with a warning above the max growth.
+- **Cell count** (exact) against the maximum.
+- **Top view** of the wing with the slices, the selected slice and the spanwise cell faces.
 - **2D mesh preview of any slice**, computed with blockMesh's own point interpolation, so it is the
   real mesh:
   - colour by cell size, aspect ratio (in the slice, or 3D with the spanwise size), size ratio to
     the neighbours, or smallest corner angle;
   - zoom to the whole domain, airfoil, LE or TE; hover a cell for its values.
-- **Slice summary and measured cell sizes per edge parameter** (e.g. the first wall cell height).
-- **Plots**: chordwise cell length along the airfoil (largest jump), first wall-normal cell height,
-  wall-normal and wake distributions, spanwise cell size.
+- **Detailed analysis**:
+  - the result table of the last optimisation: every metric before and after, with its target;
+  - every slice in one table: y, layers, cells, y+, cell sizes, aspect ratios, size ratios inside
+    and across blocks, non-orthogonality, skewness, smallest angle, folded cells, spanwise size and
+    jump; with errors, warnings (checkMesh limits, targets) and known mshGen limitations listed below;
+  - the spanwise cell size along the span (slices dashed, the selected slice red);
+  - measured cell sizes per edge parameter in the selected slice;
+  - plots of the selected slice: chordwise cell length along the airfoil (largest jump), first
+    wall-normal cell height, wall-normal and wake distributions.
 
 **5. Build & check**
 - **Options**: Fluent export, images (mshGen plots and 13 ParaView views), and the environment
@@ -235,6 +238,15 @@ python GUI/tests/test_m1.py [--openfoam] # with --openfoam about 4 minutes (bloc
 python GUI/tests/test_m2.py [--openfoam] # with --openfoam about 5 minutes
 ```
 
+**test_m8** (`python GUI/tests/test_m8.py [--openfoam]`, about 4 minutes, with --openfoam about 12 minutes): the mesh optimiser of step 4
+on new NACA0012 (COARSE, MEDIUM) and FFA_W3_211 wings and a copy of MegAWES_wing.
+- The Python port of mshGen's edge → block resolution and grading equals mshGen's blocks.
+- Every target is met: y+ (wing median, tip face), chordwise and spanwise counts, cells, growth
+  ratios. Mean non-orthogonality and faces above 40° are not worse than with mshGen's defaults, the
+  largest non-orthogonality stays below 70°, and no slice has folded cells.
+- With --openfoam, the COARSE meshes of the new wings are built: cells = estimate, no failed check
+  other than the aspect ratio, and y+ measured on the mesh within 15 % of the target.
+
 **test_m7** (`python GUI/tests/test_m7.py [--openfoam]`, with --openfoam about 15 minutes): the block
 optimiser of step 3b on new FFA_W3_211 and NACA0012 wings.
 - Its own vertices equal mshGen's.
@@ -242,17 +254,19 @@ optimiser of step 3b on new FFA_W3_211 and NACA0012 wings.
 - With --openfoam, both meshes are built: lower average non-orthogonality, and no failed check other
   than the aspect ratio.
 
-**test_m6** (`python GUI/tests/test_m6.py [MegAWES|FFA|swept]`, about 15 minutes, needs OpenFOAM):
+**test_m6** (`python GUI/tests/test_m6.py [MegAWES|FFA|swept]`, about 15 minutes, needs OpenFOAM): the
+earlier quality optimiser at a fixed cell count (`core/quality.py`, no longer in the GUI).
 - Each mesh is optimised with all variable groups, then built.
 - checkMesh before and after must show the same cells, non-orthogonality and skewness that are not
   worse, no additional failed checks, and unchanged y+.
 
 **test_m5** (`python GUI/tests/test_m5.py`, about 5 minutes, needs OpenFOAM and ParaView):
 - The full chain is driven through the app: new wing, planform, flow, split and an extra slice, the
-  helpers for y+ 30, then the build with Fluent and images.
+  mesh optimiser (COARSE, y+ 30), then the build with Fluent and images.
 - It checks the cells, y+ measured per wall patch, the Fluent zones, the 13 images and the 3D view.
 
-**test_m4** (`python GUI/tests/test_m4.py [--openfoam]`):
+**test_m4** (`python GUI/tests/test_m4.py [--openfoam]`): the sizing functions of `core/sizing.py`
+(the step 4 helpers before the mesh optimiser).
 - The wall helper hits y+ 30/50/100 on the block mesh, and the cell budget hits its total.
 - The basic MegAWES example is set up only with the helpers for y+ 50, built, and y+ is measured
   per wall patch on the OpenFOAM mesh.
@@ -302,20 +316,22 @@ optimiser of step 3b on new FFA_W3_211 and NACA0012 wings.
   - `blockopt.py`: block optimiser of step 3b ([docs/block_optimiser.md](docs/block_optimiser.md))
   - `model.py`: mshGen in memory
   - `preview.py`: 2D slice mesh (blockMesh's interpolation), cell metrics
-  - `sizing.py`: sizing helpers and predictions
+  - `meshopt.py`: mesh optimiser of step 4 ([docs/mesh_optimiser.md](docs/mesh_optimiser.md)),
+    analysis of every slice
+  - `sizing.py`: geometric series, y+, sizing functions
   - `results.py`: built mesh: y+, patches, wall surfaces, Fluent zones
   - `views.py`: camera positions of the ParaView images (`images.json`)
-  - `quality.py`: quality metrics in the slices, optimiser
+  - `quality.py`: quality metrics in the slices, quality optimiser at a fixed cell count (test_m6)
 - `tools/visualize_mesh.py`: ParaView images of any case
 - `tools/tutorial/`: recorder of the tutorial video
   - `record.py`: scenario and video assembly
   - `browser.py`: headless Firefox via Marionette
   - `page.js`: widget helpers and pop-ups in the page
-- `docs/`: tutorial video and its chapters, `block_optimiser.md`
+- `docs/`: tutorial video and its chapters, `block_optimiser.md`, `mesh_optimiser.md`
 - `ui/`:
   - `common.py`, `vertexpanel.py`, `view3d.py` (3D views: WebGL probe, server-rendered images)
   - `step1_geometry.py`, `step2_domain.py`, `step3_blocks.py` (3a slicing, 3b blocking)
-  - `step4_meshing.py`, `helpers.py`
+  - `step4_meshing.py`
   - `build.py` (step 5)
 - `templates/`: `generate_mesh.py`, `Allrun.pre`, OpenFOAM files
 - `tests/`

@@ -124,7 +124,7 @@ class App:
             err = fut.exception()
             done(None if err else fut.result(), err)
         self.build.poll()
-        self.meshing.helpers.poll()
+        self.meshing.poll()
 
     def set_airfoil_file(self, filename):
         self.airfoil_file = filename

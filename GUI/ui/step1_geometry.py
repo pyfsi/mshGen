@@ -217,16 +217,8 @@ class GeometryStep:
         c.airfoil.name = event.new
         c.airfoil.source = "meshGeneration/airfoils/" + airfoils.LIBRARY[event.new]["file"]
         self.app.set_airfoil_file(airfoils.library_file(event.new))
-        try:
-            geometry.check_level(c)
-        except ValueError:
-            if not airfoils.has_defaults(event.new):
-                self.app.notify("warning", "mshGen's default block vertices do not work for " + event.new)
-                self._changed()
-                return
-            c.domain.mesh_scale, c.domain.mesh_level = airfoils.default_mesh_scale(event.new), "COARSE"
-            self.app.notify("warning", "No mshGen defaults for this airfoil at the previous R/c and level: "
-                                       "set R = {:g}c, COARSE".format(c.domain.mesh_scale))
+        if not airfoils.has_defaults(event.new):
+            self.app.notify("warning", "mshGen's default block vertices do not work for " + event.new)
         self._changed()
 
     def on_cog(self, event):

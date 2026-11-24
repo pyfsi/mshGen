@@ -4,7 +4,7 @@ step2_domain.py: step 2 of the GUI, domain definition
 Inputs:  C-grid radius R/c (mesh_scale), far field (symTip)
 Plots:   root plane (C-domain and root section), 3D extent seen from above (planform, patches)
 Fixed by mshGen (shown): wake length 2R, sizes based on the root chord.
-The mshGen level (mesh_level) and the flow conditions are set in step 4 (meshing); the exterior block
+The mesh level (mesh_level) and the flow conditions are set in step 4 (meshing); the exterior block
 vertices in step 3b, the slices in step 3a.
 '''
 import math
@@ -12,7 +12,7 @@ import math
 import numpy as np
 import panel as pn
 
-from core import airfoils, blocks
+from core import blocks
 from core.estimate import layer_types
 from core.planform import place, section_params
 from ui.common import COLORS, bfig, bokeh, note
@@ -67,12 +67,6 @@ class DomainStep:
         except ValueError as e:
             self.app.notify("warning", str(e))
             return
-        levels = airfoils.default_levels(c.airfoil.name, c.domain.mesh_scale)[1]
-        if c.domain.mesh_level not in levels:       # the level must exist for the new R/c (mshGen defaults)
-            old = c.domain.mesh_level
-            c.domain.mesh_level = "COARSE" if "COARSE" in levels else levels[0]
-            self.app.notify("info", "mshGen has no {} defaults for R/c = {:g}: level set to {} (step 4)".format(
-                old, c.domain.mesh_scale, c.domain.mesh_level))
         self.app.changed()
         self.render()
 
@@ -97,9 +91,8 @@ class DomainStep:
             self.far_info.object = ("= {:.3g} x half-span; {} layer(s) beyond the tip.".format(c.blocks.slice_locations[-1] / b2, flow)
                                     if flow else "_No slices beyond the tip: the domain ends at the last wing slice "
                                                  "(symTip cuts the wing)._")
-        info = airfoils.default_levels(c.airfoil.name, c.domain.mesh_scale)[2]
-        self.scale_info.object = ("_mshGen defaults for {}: {}._ Changing R/c moves the outer boundary; the block "
-                                  "vertices follow (see Blocks in the sidebar).").format(c.airfoil.name, info)
+        self.scale_info.object = ("_Changing R/c moves the outer boundary; the block vertices follow (see Blocks in "
+                                  "the sidebar). Optimise the cells again in step 4 afterwards._")
         try:
             self.plots.objects = self.make_plots()
         except Exception as e:  # noqa: BLE001

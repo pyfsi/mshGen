@@ -65,7 +65,7 @@ class VertexPanel:
             return
         self._problems, self._warnings, self._level_error, self._off = None, [], None, []
         state = geometry.vertex_state(c, f)
-        key = (state, c.airfoil.name, c.domain.mesh_scale, c.domain.mesh_level)
+        key = (state, c.airfoil.name, c.domain.mesh_scale)
         if key != self._vertex_key:     # default of the checkboxes; the user's choice is kept otherwise
             for _, chk in self.widgets.values():
                 chk.value = geometry.edge_defaults_changed(c)
@@ -75,7 +75,7 @@ class VertexPanel:
         if state == "ok":
             items.append(note("Block vertices are mshGen's defaults for this geometry.", "success"))
         elif state == "outdated":
-            items += [note("The geometry, R/c or level changed since the block vertices were computed. They are "
+            items += [note("The geometry or R/c changed since the block vertices were computed. They are "
                            "recomputed (mshGen defaults) when you save the case, or now:", "warning"), btn, chk]
         else:
             items += [note("The block vertices were set by hand (custom) and are not recomputed automatically. "

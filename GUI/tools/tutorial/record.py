@@ -67,10 +67,6 @@ def TYPED(t, n=0):
     return "T.el(T.typed({}, {}))".format(q(t), n)
 
 
-def PROPOSE(tab):
-    return "T.buttonIn({}, 'Propose')".format(q(tab))
-
-
 def CARD(title):
     return "T.el(T.cardview({}))".format(q(title))
 
@@ -182,9 +178,9 @@ class Recorder:
 # ---------------------------------------------------------------------------------------------- #
 
 def scenario(r, url, login_png):
-    from core import paths, sizing
+    from core import paths
     from core.case import Case
-    from core.planform import Planform, section_params
+    from core.planform import Planform
 
     r.chapter("Introduction")
     r.card("mshGen GUI", [
@@ -195,7 +191,7 @@ def scenario(r, url, login_png):
         "  2. Domain        size of the C-grid, far field",
         "  3a. Slicing      slices along the span, aileron and patch layers",
         "  3b. Blocking     airfoil and exterior vertices, block layout",
-        "  4. Meshing       level, flow, cells and gradings, helpers, optimiser",
+        "  4. Meshing       level, targets, flow, mesh optimiser, tables, analysis",
         "  5. Build & check blockMesh, checkMesh, y+, Fluent export, images"],
         seconds=12, sub="Structured C-grid meshes of wings with mshGen and blockMesh")
     r.card("Start the GUI", [
@@ -393,86 +389,47 @@ def scenario(r, url, login_png):
     r.do("T.click('Discard')", 2)
 
     # ---------------- step 4 ---------------- #
-    r.chapter("Step 4: Meshing - helpers")
+    r.chapter("Step 4: Meshing - targets and optimiser")
     r.do("T.radio('4. Meshing')", 6)
     b.inject()
-    r.shot("Step 4 · Level", "The level of mshGen's default resolution (starting point); only levels mshGen has "
-           "for this airfoil and R/c are offered. Choosing one loads its default cells and gradings.",
-           W_("mshGen default settings level (mesh_level)"), where="right")
-    r.do("T.set('Free-stream velocity U (m/s)', 40)", 3)
-    r.shot("Step 4 · Flow conditions", "Velocity U = 40 m/s and viscosity nu: the Reynolds number and a first "
-           "estimate of the wall-normal first cell and its y+ (flat-plate skin friction).",
-           W_("Free-stream velocity U (m/s)"), also=[W_("Kinematic viscosity nu (m2/s)"), HAS("y+ at the first cell centre")],
+    r.shot("Step 4 · Mesh level", "COARSE, MEDIUM or FINE: the level loads the presets of the targets below "
+           "(and names the settings files).", W_("Mesh level"), also=[BTN("Reset to the level presets")],
            where="right")
-    r.shot("Step 4 · Helpers", "Compute cells and gradings from target sizes. Each helper shows the old and new "
-           "values and the predicted result (measured on the block mesh) before you apply it.",
-           CARD("Helpers: cells and gradings from target sizes"), where="right")
-    r.do("T.set('Target y+ (first cell centre)', 30)", 1)
-    r.do("T.radio('limit growth ratio')", 1)
-    r.shot("Step 4 · Wall y+", "Target y+ at the first cell centre (median or maximum over the wing), keeping the "
-           "wall-normal cells or limiting the growth ratio. Sets e00 (e09/e10 follow).",
-           W_("Target y+ (first cell centre)"), also=[L_("limit growth ratio"), W_("max growth ratio")],
-           click=PROPOSE("Wall y+"), where="right")
-    r.do(PROPOSE("Wall y+") + ".click()", 2)
-    r.wait_for("!!T.button('Apply proposal')", 180)
-    time.sleep(2)
-    r.shot("Step 4 · Proposal", "The change (old -> new) and the prediction: cells, y+ on the wing and the tip "
-           "face, size jumps, aspect ratio. <b>Apply proposal</b> or <b>Discard</b>.",
-           BTN("Apply proposal"), click=BTN("Apply proposal"), where="right")
-    r.do("T.click('Apply proposal')", 6)
-    for tab_name, text, fields in (
-            ("Chordwise", "Cell size at the TE and LE, the largest cell and the growth ratio: cells and gradings "
-                          "of e03-e07, continuous at the divisions.",
-             ["cell at the TE (m)", "cell at the LE (m)", "largest cell (m)"]),
-            ("Wake", "First wake cell at the TE, largest cell and growth: e02 (near wake) and e01 (to the outlet).",
-             ["first wake cell at the TE (m)", "largest wake cell (m)"])):
-        r.do("T.tab({})".format(q(tab_name)), 2)
-        r.shot("Step 4 · " + tab_name, text, W_(fields[0]), also=[W_(f) for f in fields[1:]],
-               click=PROPOSE(tab_name), where="right")
-        r.do(PROPOSE(tab_name) + ".click()", 2)
-        r.wait_for("!!T.button('Apply proposal')", 180)
-        time.sleep(1)
-        r.do("T.click('Apply proposal')", 6)
-    r.do("T.tab('Spanwise')", 2)
-    case = Case.load(os.path.join(paths.CASES_DIR, CASE))
-    case.flow.U = 40.0
-    tip = sizing.first_height_for_yplus(case, 30.0, section_params(p.to_stations(), 6.0)[0])
-    r.do("T.set('cell at the tip (m)', {})".format(tip), 1)
-    r.shot("Step 4 · Spanwise", "Cell size on the wing, at the tip (its height sets the y+ of the tip face; here "
-           "for y+ 30) and beyond the tip: cells and grading of every layer, continuous at the slices.",
-           W_("cell at the tip (m)"), also=[W_("cell on the wing (m)"), W_("largest cell beyond the tip (m)")],
-           click=PROPOSE("Spanwise"), where="right")
-    r.do(PROPOSE("Spanwise") + ".click()", 2)
-    r.wait_for("!!T.button('Apply proposal')", 180)
-    time.sleep(1)
-    r.do("T.click('Apply proposal')", 6)
-    r.do("T.tab('Cell budget')", 2)
-    r.shot("Step 4 · Cell budget", "Scales all cell counts to a target total, optionally keeping the first wall "
-           "cell and the tip cell (y+).", W_("Target number of cells"),
-           also=[W_("keep the first wall cell and the tip cell (y+)")], where="right")
-    r.chapter("Step 4: Meshing - quality optimiser")
-    r.do("T.tab('Optimise quality')", 2)
-    r.do("T.set('Evaluations (about 0.4 s each)', 100)", 1)
-    r.shot("Step 4 · Optimise quality", "Improves non-orthogonality, skewness and size jumps at a <b>fixed cell "
-           "count</b> (y+ unchanged). Choose what it may change, the priority and the number of evaluations. "
-           "Nothing gets worse than now.", L_("wake gradings (e01, e02)"),
-           also=[W_("Priority: size jumps (0) ... orthogonality (1)"), W_("Evaluations (about 0.4 s each)")],
-           click=PROPOSE("Optimise quality"), where="right")
-    r.do(PROPOSE("Optimise quality") + ".click()", 15)
-    r.shot("Step 4 · Optimiser running", "The progress: evaluations and the objective (smaller is better).",
-           HAS("evaluation"), where="right")
-    r.wait_for("!!T.button('Apply proposal')", 600)
-    time.sleep(2)
-    r.shot("Step 4 · Optimiser result", "The changes and the mesh quality now and with the proposal "
-           "(non-orthogonality as checkMesh, skewness, size ratios).", HAS("Mesh quality"), where="right")
-    r.do("T.click('Apply proposal')", 6)
+    r.do("T.set('Free-stream velocity U (m/s)', 40)", 3)
+    r.do("T.set('Target y+ (first cell centre)', 30)", 3)
+    r.shot("Step 4 · Targets", "y+ at the first cell centre, chordwise cells per side and spanwise cells on the "
+           "wing (min/max), the max growth ratio between neighbouring cells and the max number of cells. Here: "
+           "y+ 30 at U = 40 m/s.", W_("Target y+ (first cell centre)"),
+           also=[W_("Max growth ratio (neighbouring cells)"), W_("Chordwise cells per side: min"),
+                 W_("Max number of cells"), W_("Free-stream velocity U (m/s)")], where="right")
+    r.shot("Step 4 · What the optimiser does", "The targets are constraints; leading edge, trailing edge and wake "
+           "refinement follow from rules; the outer gradings are optimised for non-orthogonality and size jumps on "
+           "the exact block mesh.", CARD("What the optimiser does"), where="right")
+    r.shot("Step 4 · Optimise mesh", "Computes the cells and gradings of all edges and spanwise layers from the "
+           "targets.", BTN("Optimise mesh"), click=BTN("Optimise mesh"), where="right")
+    r.do("T.click('Optimise mesh')", 15)
+    r.shot("Step 4 · Optimiser running", "The progress: sizing, the outer gradings, the y+ correction.",
+           BTN("Optimising ..."), where="right")
+    r.wait_for("!!T.find('Optimisation result', 'has')", 900)
+    time.sleep(8)
+    b.inject()
+    r.shot("Step 4 · Optimised", "<b>Undo</b> restores the previous cells; the result table is in the detailed "
+           "analysis.", BTN("Undo (cells and gradings before the optimisation)"), where="right")
+    r.shot("Step 4 · Optimisation result", "The mesh before and after against the targets: y+, counts, cells, "
+           "growth ratios, LE/TE and wake resolution, non-orthogonality, inside the contour beyond the tip.",
+           HAS("Optimisation result"), also=[TYPED("Tabulator", 2)], where="left")
 
-    r.chapter("Step 4: Meshing - settings and preview")
+    r.chapter("Step 4: Meshing - tables, preview and detailed analysis")
     r.shot("Step 4 · Edges", "Cells and gradings of e00-e10 (grad1: airfoil side, grad2: outer side), editable "
-           "like a spreadsheet.", TYPED("Tabulator", 0), where="right")
-    r.shot("Step 4 · Spanwise layers", "Cells and grading per layer, first and last cell, and the size jump to "
-           "the next layer (warning above 1.3); the estimated number of cells below.", TYPED("Tabulator", 1),
-           also=[HAS("Estimated cells")], where="right")
+           "like a spreadsheet: the plots follow.", TYPED("Tabulator", 0), where="right")
+    r.shot("Step 4 · Edge plot", "The block layout of the selected slice with every edge coloured by its edge "
+           "parameter and the cell nodes along it; hover an edge for its cells and grading, select a table row to "
+           "highlight it. e08 (inside the airfoil contour) exists only beyond the tip.",
+           HAS("edges and cell nodes"), also=[TYPED("Tabulator", 0)], where="left")
+    r.shot("Step 4 · Spanwise layers", "Cells and grading per layer, first and last cell, the size jump to the next "
+           "layer; the cell count below.", TYPED("Tabulator", 1), also=[HAS("Cells:")], where="right")
+    r.shot("Step 4 · Top view", "The slices, the selected slice (red) and the spanwise cell faces (blue).",
+           HAS("Top view: slice"), where="left")
     r.shot("Step 4 · Mesh preview", "The 2D mesh of a slice, computed with blockMesh's own interpolation: it is "
            "the real mesh. Choose the slice; zoom with the presets or the mouse wheel; hover a cell for its "
            "values.", HAS("Slice 0 at y"), also=[W_("Slice"), L_("Leading edge")], where="left")
@@ -483,16 +440,14 @@ def scenario(r, url, login_png):
            W_("Colour by"), also=[HAS("Slice 0 at y")], where="left")
     r.do("T.set('Colour by', 'cell size (m)')", 2)
     r.do("T.radio('Airfoil')", 3)
-    r.shot("Step 4 · Update", "The preview updates after every change (option), or with <b>Update preview</b>.",
-           W_("update the preview after every change"), also=[BTN("Update preview")], where="left")
-    r.shot("Step 4 · Measured sizes", "Summary of the slice and the measured cell sizes per edge parameter, "
-           "e.g. the first cell at the wall.", HAS("cells in the slice"), also=[HAS("first cell at the wall (height)")],
-           where="left")
-    r.shot("Step 4 · Along the airfoil", "Chordwise cell length on both sides with the largest jump between "
-           "neighbours, and the first wall-normal cell height along the surface.",
-           HAS("Cells along the airfoil surface"), also=[HAS("First wall-normal cell height")], where="left")
-    r.shot("Step 4 · Distributions", "Wall-normal and wake cell sizes, and the spanwise cell size with the slices.",
-           HAS("Wall-normal and wake cell sizes"), also=[HAS("Spanwise cell size")], where="left")
+    r.shot("Step 4 · Detailed analysis", "Every slice in one table (y+, cell sizes, aspect ratios, size ratios, "
+           "non-orthogonality, skewness, folded cells, spanwise sizes) with warnings for checkMesh limits and the "
+           "targets, and the spanwise cell size along the span.", HAS("Detailed analysis"),
+           also=[HAS("All slices"), HAS("Spanwise cell size")], where="left")
+    r.shot("Step 4 · Along the airfoil", "Measured cell sizes per edge parameter, the chordwise cell length on "
+           "both sides with the largest jump, the first wall-normal cell height, wall-normal and wake "
+           "distributions.", HAS("chordwise cell length along the airfoil"),
+           also=[HAS("first wall-normal cell height")], where="left")
 
     # ---------------- step 5 ---------------- #
     r.chapter("Step 5: Build & check")
@@ -518,7 +473,7 @@ def scenario(r, url, login_png):
            "skewness, failed checks.", HAS("max_non_orthogonality"), where="right")
     r.wait_for("!!T.find('y+ on the walls', 'has')", 120)
     r.shot("Step 5 · y+ on the walls", "y+ measured on the built mesh per wall patch (wall distance of the first "
-           "cells): about 30, as set with the helpers.", HAS("y+ on the walls"), where="right")
+           "cells): about 30, the target of step 4.", HAS("y+ on the walls"), where="right")
     r.shot("Step 5 · Patches and Fluent zones", "Patch types and faces, and the zones of the Fluent mesh: "
            "<b>inlet</b> is written as pressure-outlet, set it to velocity-inlet in Fluent.",
            HAS("pressure-outlet"), where="right")

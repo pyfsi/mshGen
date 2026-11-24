@@ -5,7 +5,7 @@ Creates cases/zz_test_m5 (deleted afterwards) and, step by step as a user would:
   1. new wing (Mrev-v2), planform parameters (half-span, chords, sweep, twist, dihedral)
   2. flow conditions (U, nu)
   3. wing surface split (wingUp/wingDown), an extra slice
-  4. helpers: wall y+ 30 (growth <= 1.15), wake, chordwise, spanwise (tip cell for y+ 30)
+  4. mesh optimiser (step 4): level COARSE with target y+ 30
   5. save and build with Fluent export and images; then: cells = estimate, y+ measured on the mesh,
      Fluent zones, images, 3D view of the walls
 Needs OpenFOAM and ParaView (modules in case.json). Run: python GUI/tests/test_m5.py
@@ -33,8 +33,7 @@ def load_app():
 
 def main():
     g = load_app()
-    from core import estimate, paths, sizing
-    from core.planform import section_params
+    from core import estimate, paths
     folder = os.path.join(paths.CASES_DIR, NAME)
     if os.path.exists(folder):
         shutil.rmtree(folder)
@@ -82,28 +81,23 @@ def main():
         assert not a.is_dirty() and a.block_problems == [], a.block_problems
         print("3 blocks: slices", [round(s, 3) for s in a.case.blocks.slice_locations], "| split", a.case.options.split,
               "| vertices", a.case.blocks.vertex_source)
-        # 4. helpers
+        # 4. mesh optimiser: level COARSE with y+ 30
         mesh = a.meshing
         a.step.value = mesh.title
-        H = mesh.helpers
-        H.yplus.value, H.wall_mode.value = 30.0, "limit growth ratio"
-        H.propose_wall()
+        mesh.view()
+        mesh.level.value = "COARSE"
+        mesh.tw["yplus"].value = 30.0
+        assert a.case.meshing.targets["yplus"] == 30.0
+        mesh.on_optimise()
         wait()
-        H.apply()
-        H.propose_wake()
-        wait()
-        H.apply()
-        H.propose_chordwise()
-        wait()
-        H.apply()
+        assert mesh.result is not None, "no optimisation result"
+        bad = [r["metric"] for r in mesh.result["after"] if r["ok"] is False]
+        assert not bad, bad
         c = a.case
-        H.s_tip.value = sizing.first_height_for_yplus(c, 30.0, section_params(c.wing_stations, c.half_span)[0])
-        H.s_far.value = 1.0
-        H.propose_spanwise()
-        wait()
-        H.apply()
-        pred = sizing.predict(c, a.airfoil_file)
-        print("4 helpers: predicted", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in pred.items()})
+        pred = {"cells": estimate.cell_count(c)}
+        pred.update({r["metric"]: r["value"] for r in mesh.result["after"] if r["metric"].startswith("y+")})
+        print("4 optimiser:", mesh.result["note"], "|", {k: (round(v, 2) if isinstance(v, float) else v)
+                                                        for k, v in pred.items()})
         # 5. build with Fluent and images
         b = a.build
         a.step.value = b.title

@@ -56,18 +56,21 @@ GUI/
     blocks.py           slices, chordwise divisions, exterior vertices, domain size (M2)
     model.py            mshGen in memory: vertices, blocks, edges (M3)
     preview.py          2D mesh of a slice with blockMesh's interpolation, cell metrics (M3)
-    sizing.py           helpers: y+, chordwise, wake, spanwise, cell budget, prediction (M4)
+    sizing.py           geometric series, y+, sizing functions (M4; the GUI helpers were replaced by meshopt.py)
+    meshopt.py          mesh optimiser of step 4: all cells and gradings from targets; every-slice analysis
     results.py          built mesh: y+ per wall patch, patches, wall surfaces, Fluent zones (M4, M5)
     views.py            images.json: camera positions/zoom windows of the ParaView images (M5)
     quality.py          quality metrics (checkMesh non-orthogonality/skewness in the slices), optimiser (M6)
+    blockopt.py         block optimiser of step 3b
   templates/            generate_mesh.py, Allrun.pre, OpenFOAM system/ and constant/ files
   tools/                visualize_mesh.py: ParaView images of any case (pvbatch, images.json)
   ui/                   common.py, vertexpanel.py, step1_geometry.py, step2_domain.py, step3_blocks.py,
-                        step4_meshing.py, helpers.py, build.py
+                        step4_meshing.py, build.py
   tests/                test_m0.py: all examples reproduced through case.json; test_m1.py: geometry;
                         test_m2.py: domain and blocks; test_m3.py: preview against blockMesh;
                         test_m4.py: sizing helpers, automatic y+ 50 setup; test_m5.py: full chain in the app;
-                        test_m6.py: optimiser, checkMesh before/after
+                        test_m6.py: optimiser, checkMesh before/after; test_m7.py: block optimiser;
+                        test_m8.py: mesh optimiser of step 4
 ```
 
 ## Notes from M0
@@ -266,3 +269,20 @@ warnings and the estimated cell count.
   optimiser does not use that value.
 - UI: tab "Optimise quality" in the step 4 helpers (groups, priority, evaluations, live progress; the
   proposal shows the changes, the quality before/after and the predicted cells/y+).
+
+## Step 4 simplified: mesh optimiser (24.11.2026)
+
+- Step 4 has a mesh level (presets), editable targets (y+, chordwise and spanwise cell ranges, max growth, max
+  cells; stored in `meshing.targets`), U and nu, and **Optimise mesh** (`core/meshopt.py`,
+  [docs/mesh_optimiser.md](docs/mesh_optimiser.md)): all edge cells/gradings and the spanwise layers follow from
+  the targets (sizing rules, then the outer gradings optimised on the exact block mesh, then a y+ correction).
+  The helpers and the "Optimise quality" tab are gone (`ui/helpers.py` removed); `core/sizing.py` and
+  `core/quality.py` remain as libraries (tests m4, m6).
+- The level no longer loads mshGen's default cells and no longer outdates the block vertices (mshGen's default
+  vertices are the same for every level); mshGen defaults are asked with an available level.
+- Top view with the spanwise cell faces, spanwise size plot; a "Detailed analysis" section with every slice in one
+  table and warnings (checkMesh limits, targets, known mshGen limitations).
+- e08 (beyond the tip) starts with the wall-normal first cell at the airfoil contour and grows to the e07 cells inside
+  (it was 1 uniform cell: large cells inside the extension of the wing). Edge plot next to the edges table.
+- Beyond the tip the quality search includes the blocks inside the airfoil contour (tip slice, weight 0.5), with e08
+  and grad1 of e03-e07 as variables against the fit of the chordwise cells; e08 matched at both ends.

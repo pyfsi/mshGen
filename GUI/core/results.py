@@ -5,7 +5,6 @@ measured_yplus: y+ of the wall-adjacent cells per wall patch, from the wall dist
 (checkMesh -writeFields '(wallDistance)', written by Allrun.pre) and the same flat-plate u_tau with the
 local chord as the GUI's prediction (core/sizing.py), so both can be compared directly.
 '''
-import itertools
 import os
 import re
 
@@ -97,16 +96,34 @@ def fluent_zones(msh_file):
 
 
 def _faces(path, start, count):
-    '''Point labels of faces start ... start+count-1 (one face per line, ASCII polyMesh).'''
+    '''
+    Point labels of faces start ... start+count-1 (ASCII polyMesh). A face is one line "n(a b c ...)", or, for long
+    faces (e.g. the polygons of a merged non-conformal interface), several lines: "n", "(", one label per line, ")".
+    '''
     with open(path) as f:
         for line in f:                                  # skip the header up to the face count and "("
             if re.match(r"^\d+\s*$", line):
                 break
         next(f)                                         # "("
-        out = []
-        for line in itertools.islice(f, start, start + count):
-            inner = line[line.index("(") + 1:line.rindex(")")]
-            out.append([int(v) for v in inner.split()])
+        out, k = [], 0
+        for line in f:
+            if k >= start + count:
+                break
+            if not line.strip():
+                continue
+            if "(" in line:                             # one-line face
+                if k >= start:
+                    inner = line[line.index("(") + 1:line.rindex(")")]
+                    out.append([int(v) for v in inner.split()])
+                k += 1
+                continue
+            n = int(line)                               # multi-line face: "n", "(", n labels, ")"
+            next(f)
+            labels = [int(next(f)) for _ in range(n)]
+            next(f)
+            if k >= start:
+                out.append(labels)
+            k += 1
     return out
 
 
