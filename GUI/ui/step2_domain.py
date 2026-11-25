@@ -7,20 +7,27 @@ Fixed by mshGen (shown): wake length 2R, sizes based on the root chord.
 The mesh level (mesh_level) and the flow conditions are set in step 4 (meshing); the exterior block
 vertices in step 3b, the slices in step 3a.
 '''
+import copy
+import json
 import math
 
 import numpy as np
 import panel as pn
 
-from core import blocks
+from core import blockopt, blocks, geometry, meshopt
+from core.sizing import apply_proposal
 from core.estimate import layer_types
 from core.planform import place, section_params
 from ui.common import COLORS, bfig, bokeh, note
 from ui.step1_geometry import airfoil_data
 
 
+MAKE = "Make mesh (slices, block vertices, cells)"
+
+
 class DomainStep:
     title = "2. Domain"
+    intro = 'The size of the C-grid and the far field; Make mesh does steps 3 and 4 in one go.'
 
     def __init__(self, app):
         self.app = app
@@ -34,11 +41,20 @@ class DomainStep:
 
         self.scale.param.watch(self.on_scale, "value")
         self.far.param.watch(self.on_far, "value")
+        self.make_btn = pn.widgets.Button(name=MAKE, button_type="primary", sizing_mode="stretch_width")
+        self.make_btn.on_click(lambda e: self.on_make())
+        self.make_info = pn.pane.Markdown(
+            "_Does steps 3 and 4 for you: suggests the slices (3a), suggests the block vertices (3b) and optimises the "
+            "cells and gradings for the targets of the mesh level (4). About 1 to 3 minutes; Undo (top right) reverts "
+            "it. Check the result in steps 3 and 4, then build in step 5._", styles={"font-size": "13px"})
+        self.make_progress = pn.pane.Markdown("", styles={"color": "#2c6e9b"})
+        self._progress = None
 
         self.inputs = pn.Column(
             pn.pane.Markdown("### C-grid"), self.scale, self.scale_info,
             self.far_box,
-            width=430, sizing_mode="fixed")
+            pn.pane.Markdown("### Blocking and meshing"), self.make_btn, self.make_progress, self.make_info,
+            width=430, sizing_mode="fixed", margin=(5, 40, 5, 10))
 
     def load(self):
         c = self.app.case
@@ -81,6 +97,68 @@ class DomainStep:
         self.app.changed()
         self.render()
 
+    # ---------------- make mesh (steps 3a, 3b, 4) ---------------- #
+    def poll(self):
+        if self._progress is not None:
+            self.make_progress.object = "**" + self._progress + "**"
+
+    def on_make(self):
+        from ui.step1_geometry import airfoil_data
+        app = self.app
+        c, f = app.case, app.airfoil_file
+        problems = c.validate() + meshopt.target_problems(meshopt.targets(c), c.dim)
+        if problems:
+            app.notify("warning", "Cannot make the mesh: " + "; ".join(problems))
+            return
+        key = json.dumps(c.to_dict(), sort_keys=True)
+        work = copy.deepcopy(c)
+        self.make_btn.disabled, self.make_btn.name = True, "Making the mesh ..."
+        self._progress = "starting ..."
+        notes = []
+
+        def progress(text):
+            self._progress = text
+
+        def job():
+            a = airfoil_data(work.airfoil.name, f)
+            if work.dim == "3D":
+                progress("1/4 suggesting the slices")
+                blocks.suggest_slices(work)
+            if geometry.vertex_state(work, f) == "outdated":
+                progress("2/4 recomputing the block vertices (mshGen defaults)")
+                geometry.recompute_vertices(work, f)
+            progress("3/4 suggesting the block vertices (about 40 s)")
+            try:
+                r = blockopt.suggest(work, a, f)
+                apply_proposal(work, {"interior_points": r["interior_points"],
+                                      "exterior_points": r["exterior_points"]})
+            except ValueError as e:
+                notes.append("block vertices kept (" + str(e) + ")")
+            progress("4/4 optimising the cells and gradings")
+            r = meshopt.optimise(work, f, a, meshopt.targets(work),
+                                 progress=lambda t: progress("4/4 optimising the cells: " + str(t)))
+            work.meshing.edges = {k: list(v) for k, v in r["edges"].items()}
+            if r["layers"] is not None:
+                work.meshing.layer_resolution = [int(n) for n in r["layers"][0]]
+                work.meshing.layer_grading = [float(g) for g in r["layers"][1]]
+            return [row["metric"] for row in r["after"] if row["ok"] is False]
+
+        def done(bad, error):
+            self.make_btn.disabled, self.make_btn.name = False, MAKE
+            self._progress = None
+            self.make_progress.object = ""
+            if error:
+                app.notify("error", "Make mesh failed: " + str(error))
+                return
+            if json.dumps(app.case.to_dict(), sort_keys=True) != key:
+                app.notify("warning", "The case changed meanwhile: the result was discarded")
+                return
+            app.apply_case(work)
+            msg = "Mesh made (not saved yet): check steps 3 and 4, then build in step 5"
+            extra = notes + (["not met: " + ", ".join(bad)] if bad else [])
+            app.notify("warning" if bad else "success", msg + ("; " + "; ".join(extra) if extra else ""))
+        app.run_background(job, done)
+
     # ---------------- view ---------------- #
     def render(self):
         c = self.app.case
@@ -91,8 +169,8 @@ class DomainStep:
             self.far_info.object = ("= {:.3g} x half-span; {} layer(s) beyond the tip.".format(c.blocks.slice_locations[-1] / b2, flow)
                                     if flow else "_No slices beyond the tip: the domain ends at the last wing slice "
                                                  "(symTip cuts the wing)._")
-        self.scale_info.object = ("_Changing R/c moves the outer boundary; the block vertices follow (see Blocks in "
-                                  "the sidebar). Optimise the cells again in step 4 afterwards._")
+        self.scale_info.object = ("_Changing R/c moves the outer boundary; the block vertices follow (see step 3b, "
+                                  "Airfoil blocking). Optimise the cells again in step 4 afterwards, or use Make mesh._")
         try:
             self.plots.objects = self.make_plots()
         except Exception as e:  # noqa: BLE001

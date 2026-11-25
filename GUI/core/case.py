@@ -119,7 +119,7 @@ class Environment:
     python_module: str = "Anaconda3-python/2023.09-0"
     openfoam_module: str = "OpenFOAM/v2112-foss-2021b"
     paraview_module: str = "ParaView/5.9.1-foss-2021b-mpi"
-    fluent: bool = True             # export fluentInterface/<case>.msh with foamMeshToFluent
+    fluent: bool = False            # export fluentInterface/<case>.msh with foamMeshToFluent
 
 
 @dataclass

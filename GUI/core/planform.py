@@ -98,19 +98,48 @@ def stations_problems(stations):
     return p
 
 
-def describe(stations):
-    '''Derived values of the half wing (planform as mshGen builds it, twist and dihedral not projected).'''
+def _integral(st, f):
+    '''Integral over the half-span of f(rows), the rows linear in y between the table rows (as mshGen interpolates
+    them): Simpson's rule per interval, exact for products of up to three linear quantities (chord, y, dx, dz).'''
+    dy = np.diff(st[:, 1])
+    a, m = f(st), f(0.5 * (st[:-1] + st[1:]))
+    return float(np.sum(dy / 6.0 * (a[:-1] + 4.0 * m + a[1:])))
+
+
+def reference_values(stations, cog=(0.0, 0.0, 0.0)):
+    '''
+    Reference values of the half wing, exact for the planform rows: the projected area S, the mean aerodynamic chord
+    MAC = (1/S) int c^2 dy, its spanwise position (1/S) int c y dy and leading-edge x (1/S) int c x_LE dy (from the
+    root LE), and its quarter-chord point in mesh coordinates (x, z): (1/S) int c (quarter chord of the section) dy,
+    with the sections placed as mshGen places them (twist about the LE, dx, dz, the COG).
+    '''
     st = np.asarray(stations, dtype=float)
-    y, c, dx = st[:, 1], st[:, 2], st[:, 4]
+    S = _integral(st, lambda r: r[:, 2])
+
+    def quarter(r, i):
+        a = np.radians(-r[:, 3])
+        if i == 0:
+            return r[:, 2] * 0.25 * np.cos(a) - (cog[0] + r[:, 4])
+        return r[:, 2] * 0.25 * np.sin(a) - cog[2] + r[:, 5]
+    return {"area": S, "mac": _integral(st, lambda r: r[:, 2] ** 2) / S,
+            "y_mac": _integral(st, lambda r: r[:, 2] * r[:, 1]) / S,
+            "x_le_mac": _integral(st, lambda r: -r[:, 2] * r[:, 4]) / S,
+            "quarter_chord": tuple(_integral(st, lambda r, i=i: r[:, 2] * quarter(r, i)) / S for i in (0, 1))}
+
+
+def describe(stations):
+    '''Derived values of the half wing (planform as mshGen builds it, twist and dihedral not projected). Sweep and
+    dihedral outboard of the constant-chord part, as the planform parameters (fit).'''
+    st = np.asarray(stations, dtype=float)
+    y, c = st[:, 1], st[:, 2]
     b2 = y[-1]
-    s_half = float(np.trapz(c, y))
-    mac = float(np.trapz(c ** 2, y) / s_half) if s_half > 0 else float("nan")
-    x_le = -dx
-    sweep = math.degrees(math.atan2(x_le[-1] - x_le[0], b2)) if b2 > 0 else 0.0
+    ref = reference_values(st)
+    s_half, p = ref["area"], fit(stations)
     return {"half-span (m)": b2, "span (m)": 2 * b2, "root chord (m)": float(c[0]), "tip chord (m)": float(c[-1]),
             "taper ratio": float(c[-1] / c[0]), "area, full wing (m2)": 2 * s_half,
             "aspect ratio": (2 * b2) ** 2 / (2 * s_half) if s_half > 0 else float("nan"),
-            "mean aerodynamic chord (m)": mac, "average LE sweep (deg)": sweep,
+            "mean aerodynamic chord (m)": ref["mac"], "MAC at y (m)": ref["y_mac"],
+            "LE sweep outboard (deg)": p.le_sweep_deg, "dihedral outboard (deg)": p.dihedral_deg,
             "tip twist - root twist (deg)": float(st[-1, 3] - st[0, 3]), "tip height dz (m)": float(st[-1, 5])}
 
 

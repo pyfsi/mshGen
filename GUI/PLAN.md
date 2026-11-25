@@ -329,3 +329,38 @@ warnings and the estimated cell count.
 - Developed and tested on one COARSE mesh only (MegAWES, 1.43 million cells; 300 iterations on 16 cores in about
   5 minutes). Test: tests/test_m10.py (one built case; default a new NACA0012 wing).
 
+
+## Finalising the tool (24.11.2026)
+
+- Header: fact/quote of the day (`core/quotes.py`, chosen by the day of the year) and Undo/Redo of every case edit
+  (snapshots of case.json in `App.changed`, 100 deep; Make mesh and the optimiser are one step each).
+- Sidebar: a status mark per step (valid, attention, error, not done, running); the block panel, "Settings valid" and
+  the 3D-view switch are gone (the WebGL probe stays; the URL parameter view3d still overrides).
+- Step 2: Make mesh = suggest slices, recompute outdated vertices, suggest block vertices, optimise the mesh.
+- Layout (chosen with the user): every step = title + one-line intro, inputs left of the main plots, then
+  full-width sections with a horizontal line; spacing as before. Step 1's 3D view and step 3b's exterior vertices,
+  block check and patches moved to full-width sections; step 5 hides the log until a build starts.
+- Final touches (25.11.2026, from the user's test of a new wing: NACA2420, kink at 1.5 m, taper,
+  sweep, dihedral and 5 deg washout):
+  - Reference values: the mean aerodynamic chord was the trapezoidal rule on c^2 (1.15 m instead of 1.07 m on that
+    wing); now exact for the planform rows (`planform.reference_values`, Simpson per interval), the moment about the
+    quarter chord of the MAC. The AI review got only root and tip and assumed a straight taper (5.4 instead of
+    6.0 m2): the facts now hold the planform rows, the area and the MAC.
+  - Step 6 sections: a row of wall faces was taken within 3e-7 m of the nearest face; on twisted parts the centres
+    of one row spread by 7e-6 m (warped faces), so three of four sections had 20-40 % of their faces, one side only.
+    Rows now come from the gaps between them (`simulation._rows`: the largest jump in the gap sizes, checked: rows
+    narrow against the gaps; modelled up to 1 % spread for 30 deg of twist). Without SPLIT, wingTip holds the wing
+    surface of the tip layer too: it was taken as the tip cap (now found by its plane). The section at each y is
+    the one of the mesh (slices interpolated linearly), not of the planform rows between slices (a wing with a
+    planform row inside its tip layer: 246 faces on the wrong side and x/c from 0.14; now 0).
+  - Block optimiser: mshGen's defaults for NACA2420 are closer than the minimum gaps (bottom 0.04 R and 0.02 R),
+    and the wall-normal start usually is: "no admissible start". Starts are now spread to the gaps (least squares,
+    pool adjacent violators); the gaps apply to the moved vertices only. The wall-normal start now often wins
+    (FFA_W3_211: objective 0.18 -> 0.14, faces above 40 deg 10.4 -> 6.5 %); about 40 s instead of 20-30 s.
+  - Top views of 3b and 4 with explicit ranges (the automatic ones kept the first case's extent); step 4's reset
+    button next to the level; step 5: images on and Fluent export off by default, image 14 the mesh inside the wing
+    contour beyond the tip; the AI summary ends with "Finally, don't forget to bring cake to the office!" (shown so
+    for saved summaries too); step 6: convergence ranges from the data (force coefficients: the last 80 %).
+  - The plots next to the inputs in 3b and 4 shrink with the window, keeping their aspect ratio (at most their own
+    size): in a 1600 px window (the tutorial's) the block plot's tools, the preview's colour bar and the edge plot
+    were cut off. Step 4's "Update preview" sits next to its checkbox.

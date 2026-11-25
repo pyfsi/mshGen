@@ -208,14 +208,17 @@ def expansions(xz, wall_lengths):
     return out
 
 
-def order_problems(pts, ext, R):
-    '''Order along the splines and the outer boundary (with minimum gaps); empty: admissible.'''
+def order_problems(pts, ext, R, move=("airfoil", "exterior")):
+    '''Order along the splines and the outer boundary (with minimum gaps); empty: admissible. The minimum gaps are
+    checked for the vertices that are moved (the others are the user's; mshGen's block check judges them).'''
     p = division_problems(pts)
     pos = [v[0] for v in pts]
-    for idx in ([1, 4, 7, 10], [3, 6, 9, 11]):
+    for idx in ([1, 4, 7, 10], [3, 6, 9, 11]) if "airfoil" in move else ():
         vals = [1.0] + [pos[i] for i in idx] + [0.0]
         if any(a - b < GAP for a, b in zip(vals, vals[1:])):
             p.append("airfoil vertices closer than {} along a spline".format(GAP))
+    if "exterior" not in move:
+        return p
     x = {vid: ext[vid - 22][0] for vid in range(22, 39)}
     for name, vals in (("top", [x[29]] + [x[v] for v in (28, 27, 26, 25)] + [2 * R]),
                        ("bottom", [x[33]] + [x[v] for v in (34, 35, 36, 37)] + [2 * R])):
@@ -323,7 +326,7 @@ class Problem:
         return pts, ext
 
     def objective(self, pts, ext, check=True):
-        if check and order_problems(pts, ext, self.R):
+        if check and order_problems(pts, ext, self.R, self.move):
             return INFEASIBLE
         total = 0.0
         for sl in self.slices:
@@ -335,6 +338,37 @@ class Problem:
 
     def __call__(self, x):
         return self.objective(*self.vertices(x))
+
+    def spread(self, pts, ext):
+        '''
+        A start that keeps the minimum gaps of order_problems: the moved vertices along the splines, the top, the
+        bottom and the C-arc moved as little as possible (least squares) to their gaps, the ends fixed (TE / LE,
+        x = 0 / the outlet, the arc ends). mshGen's defaults are closer than the gaps for some airfoils (NACA2420,
+        bottom: 0.04 R and 0.02 R). None if the vertices do not fit.
+        '''
+        R = self.R
+        pts, ext = [list(v) for v in pts], [list(v) for v in ext]
+        if "airfoil" in self.move:
+            for idx in ([1, 4, 7, 10], [3, 6, 9, 11]):          # positions fall from the TE (1) to the LE (0)
+                v = _spread([-1.0] + [-pts[i][0] for i in idx] + [0.0], GAP)
+                if v is None:
+                    return None
+                for i, val in zip(idx, v):
+                    pts[i][0] = -val
+        if "exterior" in self.move:
+            for vids, z in (([28, 27, 26, 25], R), ([34, 35, 36, 37], -R)):
+                v = _spread([0.0] + [ext[i - 22][0] for i in vids] + [2 * R], GAP_OUT * R)
+                if v is None:
+                    return None
+                for i, val in zip(vids, v):
+                    ext[i - 22] = [val, z]
+            ang = [math.atan2(ext[i - 22][1], ext[i - 22][0]) % (2 * math.pi) for i in ARC]
+            v = _spread([math.pi / 2] + ang + [1.5 * math.pi], GAP_ARC)
+            if v is None:
+                return None
+            for i, a in zip(ARC, v):
+                ext[i - 22] = [R * math.cos(a), R * math.sin(a)]
+        return pts, ext
 
     def normal_start(self, pts, ext):
         '''Exterior vertices where the wall normals of their airfoil vertices meet the boundary (root slice);
@@ -358,6 +392,29 @@ class Problem:
         ext[31 - 22] = [-R, 0.0]
         ext[29 - 22], ext[33 - 22] = [0.0, R], [0.0, -R]
         return ext
+
+
+def _spread(vals, gap):
+    '''
+    vals increasing with at least gap between neighbours, the first and the last fixed, the others moved as little
+    as possible (least squares): pool adjacent violators on u_i = v_i - i gap, clipped to the ends. None if they do
+    not fit between the ends.
+    '''
+    v = np.asarray(vals, dtype=float)
+    gap *= 1.0 + 1e-9                        # still at least the gap after rounding
+    i = np.arange(len(v))
+    u = v - i * gap
+    if u[-1] < u[0]:
+        return None
+    pools = []                                # [sum, count]
+    for val in u[1:-1]:
+        pools.append([val, 1])
+        while len(pools) > 1 and pools[-2][0] / pools[-2][1] > pools[-1][0] / pools[-1][1]:
+            s, n = pools.pop()
+            pools[-1][0] += s
+            pools[-1][1] += n
+    fit = np.concatenate([np.full(n, s / n) for s, n in pools]) if pools else np.zeros(0)
+    return [float(x) for x in np.clip(fit, u[0], u[-1]) + i[1:-1] * gap]
 
 
 def _ray_to_boundary(p, d, R, dz):
@@ -510,8 +567,13 @@ def suggest(case, airfoil, airfoil_file, move="airfoil and exterior vertices", f
     best, evals = None, 0
     for n, (name, pts, ext) in enumerate(starts):
         x0 = prob.vector(pts, ext)
-        if prob(x0) >= INFEASIBLE:
-            continue
+        if prob(x0) >= INFEASIBLE:                          # closer than the minimum gaps: spread them first
+            fixed = prob.spread(*prob.vertices(x0))
+            if fixed is None:
+                continue
+            x0, name = prob.vector(*fixed), name + " (spread to the minimum gaps)"
+            if prob(x0) >= INFEASIBLE:
+                continue
         x, j, ne = pattern_search(prob, x0, prob.lo, prob.hi, steps, max_evals)
         evals += ne
         if progress:

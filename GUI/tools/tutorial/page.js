@@ -131,11 +131,14 @@ window.T = (function () {
     v.model.value = value;
     return true;
   }
-  function radio(label, kind) {           // select an option of a radio/button group
-    const v = find(label, "labels");
-    if (!v) return false;
-    v.model.active = v.model.labels.indexOf(label);
-    return true;
+  function radio(label, kind) {           // select an option of a radio/button group (labels may carry a status mark)
+    for (const v of views()) {
+      const m = v.model;
+      if (!m || !Array.isArray(m.labels) || !v.el || v.el.getBoundingClientRect().width === 0) continue;
+      const i = m.labels.findIndex((l) => l === label || l.startsWith(label + " "));
+      if (i >= 0) { m.active = i; return true; }
+    }
+    return false;
   }
   function check(label, on) {             // Checkbox (Bokeh Checkbox: label + active true/false) on/off
     const v = find(label, "title") || find(label, "labels");

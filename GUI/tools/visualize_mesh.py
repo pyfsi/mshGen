@@ -8,7 +8,8 @@ images.json is written by the GUI (GUI/core/views.py): patch names, root section
 Images in ./images:
     01 root plane, 02 root airfoil, 03 leading edge, 04 trailing edge, 05 first cells at the leading edge
     3D cases also: 06/07 wing (suction/pressure side), 08 planform, 09 tip, 10-13 cut at constant x
-    (spanwise cells near the tip, tip zoom, first cells at the tip, whole domain)
+    (spanwise cells near the tip, tip zoom, first cells at the tip, whole domain), 14 the mesh inside the wing
+    contour beyond the tip (cut through the first spanwise cells beyond the tip, the tip section outlined)
 '''
 import json
 import os
@@ -24,6 +25,7 @@ if not os.path.exists(spec["foam"]):
 
 UP, DOWN, TIP, OTHER = [0.27, 0.51, 0.71], [0.90, 0.55, 0.20], [0.60, 0.60, 0.60], [0.80, 0.30, 0.30]
 EDGE = [0.15, 0.15, 0.15]
+OUTLINE = [0.85, 0.33, 0.05]            # the wing contour in the cut beyond the tip
 
 view = CreateView("RenderView")
 view.ViewSize = [1600, 1000]
@@ -136,7 +138,8 @@ if spec["dim"] == "3D":
         save("09_wing_tip_3d")
     # ---------------------- Cut at constant x ---------------------- #
     hide_all()
-    cut = Slice(Input=reader(["internalMesh"]))
+    internal = reader(["internalMesh"])
+    cut = Slice(Input=internal)
     cut.SliceType = "Plane"
     cut.SliceType.Origin = [xcut, 0, 0]
     cut.SliceType.Normal = [1, 0, 0]
@@ -162,3 +165,27 @@ if spec["dim"] == "3D":
     save("12_cut_{}_tip_first_cells".format(tag))
     camera_2d([1, 0, 0], [0, 0, 1], [xcut, 0.5 * far, dz0], 2.15 * R)
     save("13_cut_{}_whole_domain".format(tag))
+    # ---------------------- Mesh inside the wing contour (beyond the tip) ---------------------- #
+    it = sp.get("interior")
+    if it:
+        hide_all()
+        cy = Slice(Input=internal)              # through the middle of the first spanwise cells beyond the tip
+        cy.SliceType = "Plane"
+        cy.SliceType.Origin = [0, it["y_cut"], 0]
+        cy.SliceType.Normal = [0, 1, 0]
+        cy.Triangulatetheslice = 0
+        show(cy, [0.97, 0.97, 0.97])
+        for r, _ in readers:                    # the wing contour: the walls cut just inside the tip
+            pc = Slice(Input=r)
+            pc.SliceType = "Plane"
+            pc.SliceType.Origin = [0, it["y_outline"], 0]
+            pc.SliceType.Normal = [0, 1, 0]
+            d = Show(pc, view)
+            d.ColorArrayName = ["POINTS", ""]
+            d.AmbientColor = OUTLINE
+            d.DiffuseColor = OUTLINE
+            d.LineWidth = 4
+        le, te = it["le"], it["te"]
+        camera_2d([0, -1, 0], [0, 0, 1], [0.5 * (le[0] + te[0]), it["y_cut"], 0.5 * (le[1] + te[1])],
+                  0.8 * sp["tip_chord"])
+        save("14_interior_wing_mesh_beyond_tip")

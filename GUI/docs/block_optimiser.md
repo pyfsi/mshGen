@@ -140,6 +140,13 @@ first, but it failed on the jump at invalid layouts.
 - a layout where the exterior vertices sit where the wall normals of their airfoil vertices meet the
   boundary.
 
+A start that is closer than the minimum gaps is first spread to them: the moved vertices along each
+spline, the top, the bottom and the C-arc are shifted as little as possible (least squares, the ends
+fixed). mshGen's own defaults are closer for some airfoils (NACA2420: 0.04 R and 0.02 R on the
+bottom), and the wall-normal layout often is; without this, such a case had no admissible start.
+The minimum gaps apply to the vertices that are moved: with "airfoil vertices only", the exterior
+vertices stay as they are.
+
 Each start runs up to 3,000 evaluations, and the best result is kept. Positions are rounded to 4
 decimals, exterior vertices to 0.1 mm, unless rounding would break a minimum gap.
 

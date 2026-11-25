@@ -25,7 +25,7 @@ from bokeh.plotting import figure
 from core import blocks as blocks_mod, estimate, meshopt, preview
 from core.case import EDGE_DESCRIPTION, EDGE_NAMES
 from core.estimate import graded_sizes, layer_types
-from ui.common import bfig, bokeh, note
+from ui.common import bfig, bokeh, note, scaled
 from ui.step3_blocks import SliceTopView
 
 COLOR_BY = {"cell size (m)": ("size", "log"), "aspect ratio, slice": ("ar", "log"),
@@ -104,7 +104,7 @@ class MeshPreview:
         f.add_layout(self.bar_log, "right")
         f.add_layout(self.bar_lin, "right")
         self.figure = f
-        self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
+        self.pane = scaled(f)
 
     def show(self, blocks, metrics, color_by, title):
         key, scale = COLOR_BY[color_by]
@@ -214,7 +214,7 @@ class EdgePlot:
         f.add_layout(f.legend[0], "below")
         f.height = EDGE_H + 40
         self.figure = f
-        self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
+        self.pane = scaled(f)
         self.zoom = pn.widgets.RadioButtonGroup(options=["Whole domain", "Airfoil", "Trailing edge"],
                                                 value="Whole domain", button_type="primary", width=380)
         self.blocks = None
@@ -296,6 +296,7 @@ class EdgePlot:
 
 class MeshingStep:
     title = "4. Meshing"
+    intro = 'Cells and gradings of every block edge and spanwise layer, optimised for the targets of the mesh level.'
 
     def __init__(self, app):
         self.app = app
@@ -304,8 +305,9 @@ class MeshingStep:
         self.result = None              # last optimiser result (shown until the case is loaded again / undone)
         self.undo_state = None
         # level and targets
-        self.level = pn.widgets.Select(name="Mesh level", options=meshopt.LEVELS, width=200)
-        self.preset_btn = pn.widgets.Button(name="Reset to the level presets", button_type="light", width=200)
+        self.level = pn.widgets.Select(name="Mesh level", options=meshopt.LEVELS, width=240)
+        self.preset_btn = pn.widgets.Button(name="Reset to the level presets", button_type="light", width=240,
+                                            align="end")       # level with the selected level, not its label
         F, I = pn.widgets.FloatInput, pn.widgets.IntInput
         self.tw = {
             "yplus": F(name="Target y+ (first cell centre)", start=0.01, step=1.0, width=240),
@@ -336,7 +338,7 @@ class MeshingStep:
         self.undo_box = pn.Column(sizing_mode="stretch_width")      # under the optimise button
         self.opt_result = pn.Column(sizing_mode="stretch_width")    # result table (detailed analysis)
         self.opt_card = pn.Card(pn.pane.Markdown(OPTIMISER_TEXT), title="What the optimiser does",
-                                collapsed=False, sizing_mode="stretch_width")
+                                collapsed=True, sizing_mode="stretch_width")
         # tables
         self.edges = pn.widgets.Tabulator(pd.DataFrame(), show_index=False, layout="fit_data_stretch",
                                           sizing_mode="stretch_width", height=380,
@@ -361,8 +363,9 @@ class MeshingStep:
         self.span_plot = pn.Column(sizing_mode="stretch_width")
         self.color_by = pn.widgets.Select(name="Colour by", options=list(COLOR_BY), value="cell size (m)", width=300)
         self.zoom = pn.widgets.RadioButtonGroup(options=ZOOMS, value="Airfoil", button_type="primary", width=520)
-        self.auto = pn.widgets.Checkbox(name="update the preview after every change", value=True)
-        self.update_btn = pn.widgets.Button(name="Update preview", button_type="light", width=150)
+        self.auto = pn.widgets.Checkbox(name="update the preview after every change", value=True, width=270,
+                                        align="center")
+        self.update_btn = pn.widgets.Button(name="Update preview", button_type="light", width=150, align="center")
         self.preview = MeshPreview()
         self.preview_msg = pn.pane.Markdown()
         self.slice_sel.param.watch(lambda e: self.update_preview(set_range=True, detail=False), "value")
@@ -382,20 +385,21 @@ class MeshingStep:
             pn.Row(self.tw["chord_min"], self.tw["chord_max"]), self.span_row, self.tw["max_cells"],
             pn.pane.Markdown("### Flow conditions (for y+)"), pn.Row(self.U, self.nu),
             pn.Row(self.opt_btn, self.opt_progress), self.undo_box, self.opt_card,
-            width=540, sizing_mode="fixed")
+            width=540, sizing_mode="fixed", margin=(5, 40, 5, 10))
         self.tables = pn.Column(
             pn.pane.Markdown("_cells: number of cells; grad1: expansion ratio (last/first cell) on the airfoil side, "
                              "grad2: on the outer side. e09/e10: only grad2 is used (LIMITATIONS.md item 12); e08: "
                              "across the outer part of the airfoil thickness, only beyond the tip. Editable: the "
                              "plots follow. Select a row to highlight the edge in the plot._"),
             self.edges, self.layers_title, self.layers, self.jump_msg, self.count,
-            width=560, sizing_mode="fixed")
+            width=560, sizing_mode="fixed", margin=(5, 40, 5, 10))
         self.edge_plot = EdgePlot()
         self.edge_plot.zoom.param.watch(lambda e: self.edge_plot.set_zoom(), "value")
         self.edges.param.watch(self.on_edge_select, "selection")
         self.edge_section = pn.Column(
             pn.layout.Divider(), pn.pane.Markdown("## Edges and layers"),
-            pn.Row(self.tables, pn.Column(self.edge_plot.zoom, self.edge_plot.pane)), sizing_mode="stretch_width")
+            pn.Row(self.tables, pn.Column(self.edge_plot.zoom, self.edge_plot.pane, sizing_mode="stretch_width"),
+                   sizing_mode="stretch_width"), sizing_mode="stretch_width")
         self.right = pn.Column(self.slice_sel, self.top.pane, pn.Row(self.color_by), self.zoom,
                                pn.Row(self.auto, self.update_btn), self.preview_msg, self.preview.pane,
                                sizing_mode="stretch_width")

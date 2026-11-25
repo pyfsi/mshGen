@@ -11,6 +11,7 @@ The app holds the case being edited (in memory); "Save" writes case.json and all
   6. Test run (OpenFOAM simpleFoam)   ui/step6_simulation.py
 See GUI/PLAN.md.
 '''
+import html
 import json
 import os
 import shutil
@@ -21,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 import panel as pn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from core import airfoils, blockcheck, estimate, geometry, paths  # noqa: E402
+from core import airfoils, blockcheck, estimate, geometry, paths, quotes  # noqa: E402
 from core.case import Case  # noqa: E402
 from core.writer import write_case  # noqa: E402
 from ui.build import BuildStep  # noqa: E402
@@ -48,10 +49,18 @@ class App:
         self.block_problems = None          # result of the last block check (None: not checked)
         self.jobs = []
         self.executor = ThreadPoolExecutor(max_workers=1)
+        self.history, self.future, self._snap = [], [], None    # undo / redo: case states (JSON) before / after
+        self._step_labels = None
 
         # Sidebar: case
         self.case_select = pn.widgets.Select(name="Case", options=paths.list_cases())
         self.save_btn = pn.widgets.Button(name="Save", button_type="primary")
+        self.undo_btn = pn.widgets.Button(name="\u21b6 Undo", button_type="light", disabled=True, width=90,
+                                          sizing_mode="fixed", margin=(0, 4))
+        self.redo_btn = pn.widgets.Button(name="Redo \u21b7", button_type="light", disabled=True, width=90,
+                                          sizing_mode="fixed", margin=(0, 4))
+        self.undo_btn.on_click(lambda e: self.undo())
+        self.redo_btn.on_click(lambda e: self.redo())
         self.revert_btn = pn.widgets.Button(name="Revert", button_type="light")
         self.status = pn.pane.Markdown("", sizing_mode="stretch_width")
 
@@ -70,9 +79,10 @@ class App:
         self.vertex_panel = VertexPanel(self)
         self.slicing, self.blocking = SlicingStep(self), BlockingStep(self)
         self.meshing, self.build, self.simulation = MeshingStep(self), BuildStep(self), SimulationStep(self)
-        self.steps = [GeometryStep(self), DomainStep(self), self.slicing, self.blocking, self.meshing, self.build,
+        self.domain = DomainStep(self)
+        self.steps = [GeometryStep(self), self.domain, self.slicing, self.blocking, self.meshing, self.build,
                       self.simulation]
-        self.step = pn.widgets.RadioBoxGroup(name="Step", options=[s.title for s in self.steps],
+        self.step = pn.widgets.RadioBoxGroup(name="Step", options={s.title: s.title for s in self.steps},
                                              value=self.steps[0].title)
         self.main = pn.Column()
 
@@ -84,13 +94,16 @@ class App:
         self.create_btn.on_click(self.on_create)
         pn.state.add_periodic_callback(self.poll, period=500)
 
+        quote = pn.pane.HTML("<i>{}</i>".format(html.escape(quotes.of_the_day())), sizing_mode="stretch_width",
+                             styles={"color": "white", "font-size": "13px", "line-height": "1.3", "opacity": "0.92"},
+                             margin=(13, 20, 0, 20))           # baseline level with the title text
         self.template = pn.template.FastListTemplate(
             title="mshGen GUI",
-            sidebar=[self.case_select, pn.Row(self.save_btn, self.revert_btn), self.status,
-                     pn.pane.Markdown("**Blocks**"), self.vertex_panel.side, pn.layout.Divider(),
+            header=[pn.Row(quote, self.undo_btn, self.redo_btn, sizing_mode="stretch_width", align="center")],
+            sidebar=[self.case_select, pn.Row(self.save_btn, self.revert_btn), self.status, pn.layout.Divider(),
                      pn.pane.Markdown("**Steps**"), self.step, pn.layout.Divider(),
                      pn.pane.Markdown("**New case**"), self.new_mode, self.new_name, self.new_airfoil,
-                     self.example_select, self.create_btn, pn.layout.Divider(), *self.view3d.widgets()],
+                     self.example_select, self.create_btn, self.view3d.probe],
             main=[self.main], accent_base_color="#2c6e9b", header_background="#2c6e9b", sidebar_width=330)
         want_case = args.get("case", [b""])[0].decode()
         want_step = args.get("step", [b""])[0].decode()
@@ -129,12 +142,14 @@ class App:
         self.build.poll()
         self.meshing.poll()
         self.simulation.poll()
+        self.domain.poll()
 
     def set_airfoil_file(self, filename):
         self.airfoil_file = filename
 
     def changed(self, refresh_step=False):
-        '''Called after every edit: status; with refresh_step also the current step (e.g. after a recompute).'''
+        '''Called after every edit: undo history, status; with refresh_step also the current step.'''
+        self.remember()
         self.update_status()
         if refresh_step:
             step = self.current_step()
@@ -172,15 +187,118 @@ class App:
             self.status.object = ""
             return
         problems = c.validate()
-        try:
-            self.vertex_panel.refresh(compact=True)        # sidebar: block vertices and block check
-        except Exception as e:  # noqa: BLE001
-            self.vertex_panel.side.objects = [pn.pane.Alert("Block check failed: " + repr(e), alert_type="danger")]
         lines = ["**{}**{}".format(c.name, "  – _unsaved changes_" if self.is_dirty() else ""),
                  "", "Cells (estimate): **{:,}**".format(estimate.cell_count(c)),
                  "", "Folder: `cases/" + c.name + "`"]
-        lines += (["", "Problems:"] + ["- " + p for p in problems]) if problems else ["", "Settings valid"]
+        lines += (["", "Problems:"] + ["- " + p for p in problems]) if problems else []
         self.status.object = "\n".join(lines)
+        self.update_step_marks(problems)
+
+    # ---------------- step status (marks in the step list) ---------------- #
+    MARKS = {"ok": "\u2714", "warn": "\u26a0", "bad": "\u2716", "todo": "\u25cb", "busy": "\u25b6"}
+
+    def step_states(self, problems):
+        '''{step title: "ok" | "warn" | "bad" | "todo" | "busy"} for the marks in the step list.'''
+        c, f = self.case, self.airfoil_file
+        out = {}
+        geo = [p for p in problems if "slice" not in p.lower()]
+        out[self.steps[0].title] = "bad" if geo else "ok"
+        out[self.domain.title] = "ok" if not problems else "warn"
+        out[self.slicing.title] = "ok" if c.dim != "3D" or len(c.blocks.slice_locations) >= 3 else "warn"
+        try:
+            state = geometry.vertex_state(c, f)
+            if state == "outdated":
+                out[self.blocking.title] = "warn"
+            else:
+                out[self.blocking.title] = "bad" if blockcheck.problems_of(c, self.layout()) else "ok"
+        except Exception:  # noqa: BLE001
+            out[self.blocking.title] = "bad"
+        try:
+            from core.meshopt import targets
+            out[self.meshing.title] = "ok" if estimate.cell_count(c) <= targets(c)["max_cells"] else "warn"
+        except Exception:  # noqa: BLE001
+            out[self.meshing.title] = "warn"
+        owner = os.path.join(self.folder, "constant", "polyMesh", "owner")
+        case_json = os.path.join(self.folder, "case.json")
+        from ui.build import _BUILDING
+        if self.folder in _BUILDING:
+            out[self.build.title] = "busy"
+        elif not os.path.isfile(owner):
+            out[self.build.title] = "todo"
+        elif self.is_dirty() or (os.path.isfile(case_json) and os.path.getmtime(case_json) > os.path.getmtime(owner)):
+            out[self.build.title] = "warn"                  # settings changed after the last build
+        else:
+            out[self.build.title] = "ok"
+        from core import simulation as sm
+        run = os.path.join(self.folder, sm.RUN_DIR)
+        if self.simulation.running():
+            out[self.simulation.title] = "busy"
+        elif not os.path.isfile(os.path.join(run, "log.simpleFoam")):
+            out[self.simulation.title] = "todo"
+        elif sm.stale(self.folder, run):
+            out[self.simulation.title] = "warn"
+        else:
+            out[self.simulation.title] = "ok"
+        return out
+
+    def update_step_marks(self, problems=None):
+        if self.case is None:
+            return
+        try:
+            states = self.step_states(self.case.validate() if problems is None else problems)
+        except Exception:  # noqa: BLE001
+            states = {}
+        labels = {"{}  {}".format(s.title, self.MARKS.get(states.get(s.title), "")).strip(): s.title
+                  for s in self.steps}
+        if labels != self._step_labels:
+            self._step_labels = labels
+            value = self.step.value
+            self.step.options = labels
+            self.step.value = value
+
+    # ---------------- undo / redo ---------------- #
+    def remember(self):
+        '''Push the state before an edit on the undo stack (called by changed()).'''
+        if self.case is None:
+            return
+        now = _json(self.case)
+        if self._snap is not None and now != self._snap:
+            self.history = (self.history + [self._snap])[-100:]
+            self.future = []
+        self._snap = now
+        self.undo_btn.disabled, self.redo_btn.disabled = not self.history, not self.future
+
+    def undo(self):
+        if self.history:
+            self.future.append(_json(self.case))
+            self.set_case(self.history.pop())
+
+    def redo(self):
+        if self.future:
+            self.history.append(_json(self.case))
+            self.set_case(self.future.pop())
+
+    def apply_case(self, case):
+        '''Replace the case by an edited copy as one undoable edit (e.g. Make mesh in step 2).'''
+        self.history = (self.history + [_json(self.case)])[-100:]
+        self.future = []
+        self.set_case(case)
+
+    def set_case(self, state):
+        '''Replace the case being edited (JSON or Case; undo, redo, Make mesh) and show it in every step.'''
+        case = Case.from_dict(json.loads(state)) if isinstance(state, str) else state
+        if case.airfoil.name != self.case.airfoil.name:
+            own = os.path.join(self.folder, case.airfoil.file)
+            self.airfoil_file = airfoils.library_file(case.airfoil.name) if airfoils.available(case.airfoil.name) \
+                else own
+        self.case = case
+        self._snap = _json(case)
+        self.undo_btn.disabled, self.redo_btn.disabled = not self.history, not self.future
+        self.vertex_panel.load()
+        for s in self.steps:
+            s.load()
+        self.update_status()
+        self.show_step()
 
     def refresh_view(self, step):
         if self.step.value == step.title:
@@ -200,6 +318,8 @@ class App:
             self.main.objects = [pn.pane.Alert("Cannot read case.json: " + str(e), alert_type="danger")]
             return
         self.case, self.folder, self.saved_json = case, folder, _json(case)
+        self.history, self.future, self._snap = [], [], self.saved_json
+        self.undo_btn.disabled = self.redo_btn.disabled = True
         self.airfoil_file = os.path.join(folder, case.airfoil.file)
         self.dim_memory = {}
         self.vertex_panel.load()
@@ -294,7 +414,10 @@ class App:
             content = step.view()
         except Exception as e:  # noqa: BLE001
             content = [pn.pane.Alert("Cannot show this step: " + repr(e), alert_type="danger")]
-        self.main.objects = [pn.pane.Markdown("## " + step.title)] + content
+        head = [pn.pane.Markdown("## " + step.title, margin=(5, 10, 0, 10))]
+        if getattr(step, "intro", None):
+            head.append(pn.pane.Markdown("_" + step.intro + "_", styles={"color": "#555"}, margin=(0, 10, 5, 10)))
+        self.main.objects = head + content
 
 
 App().template.servable()

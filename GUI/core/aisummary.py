@@ -12,7 +12,6 @@ towards your Claude plan). The CLI runs without tools, keeps no session and runs
 '''
 import glob
 import json
-import math
 import os
 import re
 import shutil
@@ -22,7 +21,8 @@ import tempfile
 import numpy as np
 
 MODEL = "claude-opus-5-5"
-ENDING = "Enjoy your simulations! If it is successful, bring cake to the office."
+ENDING = "Finally, don't forget to bring cake to the office!"
+OLD_ENDINGS = ("Enjoy your simulations! If it is successful, bring cake to the office.",)    # summaries saved before
 CLI_TIMEOUT = 900           # s
 SUMMARY_FILE = "ai_summary.md"
 
@@ -79,19 +79,36 @@ or a title."""
 
 
 def _planform(case):
+    '''The planform: its rows (exact: mshGen interpolates linearly between them), the parameters it was made from
+    (if any) and its reference values, so that the area and the mean aerodynamic chord need not be estimated.'''
+    from .planform import reference_values
     st = np.asarray(case.wing_stations, dtype=float)
-    y, c, beta, dx, dz = st[:, 1], st[:, 2], st[:, 3], st[:, 4], st[:, 5]
+    y, c, beta = st[:, 1], st[:, 2], st[:, 3]
     b2 = float(y.max())
-    area = float(np.trapz(c, y))                              # half wing
-    le_sweep = math.degrees(math.atan2(-(dx[-1] - dx[0]), b2)) if b2 > 0 else 0.0
-    dihedral = math.degrees(math.atan2(dz[-1] - dz[0], b2)) if b2 > 0 else 0.0
-    return {"half-span (m)": b2, "root chord (m)": float(c[0]), "tip chord (m)": float(c[-1]),
-            "taper ratio": float(c[-1] / c[0]), "aspect ratio (full wing)": (2 * b2) ** 2 / (2 * area),
-            "twist root / tip (deg)": [float(beta[0]), float(beta[-1])],
-            "leading-edge offset over the span, approx. sweep (deg)": le_sweep,
-            "dihedral, approx. (deg)": dihedral, "planform stations": int(len(st)),
-            "x of leading / trailing edge at the root and the tip (m)": {
-                "root": [round(v, 4) for v in _edges_x(case, 0.0)], "tip": [round(v, 4) for v in _edges_x(case, b2)]}}
+    ref = reference_values(st)
+
+    def r4(v):
+        return float("{:.4g}".format(float(v)))
+    out = {"half-span (m)": b2, "root chord (m)": float(c[0]), "tip chord (m)": float(c[-1]),
+           "taper ratio (tip / root chord)": r4(c[-1] / c[0]),
+           "rows (chord, twist and offsets linear in y between the rows; LE x from the root LE, downstream; z up)": [
+               {"y (m)": r4(r[1]), "chord (m)": r4(r[2]), "twist (deg, nose up)": r4(r[3]), "LE x (m)": r4(-r[4]),
+                "z (m)": r4(r[5])} for r in st],
+           "projected area of the half wing (m2)": r4(ref["area"]),
+           "aspect ratio (full wing)": r4((2 * b2) ** 2 / (2 * ref["area"])),
+           "mean aerodynamic chord (m)": r4(ref["mac"]),
+           "mean aerodynamic chord: y and LE x (m)": [r4(ref["y_mac"]), r4(ref["x_le_mac"])],
+           "twist root / tip (deg)": [float(beta[0]), float(beta[-1])],
+           "x of leading / trailing edge at the root and the tip (m, mesh coordinates)": {
+               "root": [round(v, 4) for v in _edges_x(case, 0.0)], "tip": [round(v, 4) for v in _edges_x(case, b2)]}}
+    if case.wing.planform:
+        p = case.wing.planform
+        k = float(p.get("kink_y", 0.0))
+        out["made from"] = ("{}LE sweep {:g} deg and dihedral {:g} deg{}".format(
+            "constant chord and twist up to y = {:g} m (kink), then linear to the tip; ".format(k) if k > 0 else
+            "chord and twist linear from the root to the tip; ", p.get("le_sweep_deg", 0.0),
+            p.get("dihedral_deg", 0.0), " outboard of the kink" if k > 0 else ""))
+    return out
 
 
 def _edges_x(case, y):
@@ -272,4 +289,8 @@ def load(folder, name=SUMMARY_FILE):
             info = json.loads(head[5:])
         except ValueError:
             info = {}
-    return raw.strip(), info, os.path.getmtime(p)
+    text = raw.strip()
+    for old in OLD_ENDINGS:                  # shown with the current ending (the file is not changed)
+        if text.endswith(old):
+            text = text[:-len(old)].rstrip() + "\n\n" + ENDING
+    return text, info, os.path.getmtime(p)

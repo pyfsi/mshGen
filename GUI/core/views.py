@@ -12,6 +12,7 @@ import numpy as np
 
 from . import airfoils, preview
 from .blocks import radius, tip_slice
+from .estimate import graded_sizes
 from .model import mshgen_mesh
 from .planform import place, section_params
 
@@ -59,6 +60,17 @@ def image_spec(case, airfoil_file):
                         "tip_chord": ct, "tip_z_upper": z_up, "tip_z_mid": float(0.5 * (zt.max() + zt.min())),
                         "tip_first_cell": float(dy_tip),
                         "planform_x": [float(min(le)), float(max(te))]}
+        s = case.blocks.slice_locations
+        if t is not None and t + 1 < len(s):
+            # the mesh inside the wing contour (the blocks inside the airfoil, only beyond the tip): a cut through
+            # the middle of the first spanwise cells beyond the tip, and the tip section (its outline) just inside
+            first = graded_sizes(s[t + 1] - s[t], case.meshing.layer_resolution[t], case.meshing.layer_grading[t])[0]
+            last = graded_sizes(s[t] - s[t - 1], case.meshing.layer_resolution[t - 1],
+                                case.meshing.layer_grading[t - 1])[1] if t > 0 else first
+            j_le, j_te = int(np.argmin(xt)), int(np.argmax(xt))
+            spec["span"]["interior"] = {"y_cut": float(s[t] + 0.5 * first), "y_outline": float(s[t] - 0.5 * last),
+                                        "le": [float(xt[j_le]), float(zt[j_le])],
+                                        "te": [float(xt[j_te]), float(zt[j_te])]}
     return spec
 
 

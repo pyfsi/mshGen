@@ -43,6 +43,7 @@ DIVIDER = {"margin": (18, 0, 6, 0)}
 
 class BuildStep:
     title = "5. Build & check"
+    intro = 'Builds the mesh (mshGen, blockMesh) and checks it (checkMesh); optionally images and a Fluent mesh.'
 
     def __init__(self, app):
         self.app = app
@@ -51,8 +52,8 @@ class BuildStep:
         self.log_lock = threading.Lock()
         self.thread = None
         self.build_btn = pn.widgets.Button(name="Save and build mesh (Allrun.pre)", button_type="primary")
-        self.images_chk = pn.widgets.Checkbox(name="also make images (ParaView views)", value=False)
-        self.fluent_chk = pn.widgets.Checkbox(name="export to Fluent (foamMeshToFluent)", value=True)
+        self.images_chk = pn.widgets.Checkbox(name="also make images (ParaView views)", value=True)
+        self.fluent_chk = pn.widgets.Checkbox(name="export to Fluent (foamMeshToFluent)", value=False)
         self.mod_python = pn.widgets.TextInput(name="Python module")
         self.mod_openfoam = pn.widgets.TextInput(name="OpenFOAM module")
         self.mod_paraview = pn.widgets.TextInput(name="ParaView module")
@@ -65,6 +66,7 @@ class BuildStep:
             w.param.watch(self.on_options, "value")
         # quality of the built mesh
         self.quality_box = pn.Column(sizing_mode="stretch_width")
+        self.quality_plots = pn.Column(sizing_mode="stretch_width")      # top and side view, side by side
         self.analyse_btn = pn.widgets.Button(name="Analyse the mesh quality (checkMesh, about 30 s)",
                                              button_type="light", width=380)
         self.analyse_btn.on_click(lambda e: self.on_analyse())
@@ -120,13 +122,14 @@ class BuildStep:
     # ---------------- view ---------------- #
     def view(self):
         app = self.app
+        self.log_box.visible = bool(self.log_lines)          # no empty box before the first build
         out = [pn.Row(self.build_btn, pn.Column(self.images_chk, self.fluent_chk)),
                pn.Card(self.mod_python, self.mod_openfoam, self.mod_paraview, title="Environment modules",
                        collapsed=True, sizing_mode="stretch_width"),
                self.log_box]
         out += self.section("Mesh (last build)") + [
-            pn.Row(pn.Column(self.checkmesh_view(), width=470, sizing_mode="fixed"), self.quality_box,
-                   sizing_mode="stretch_width")]
+            pn.Row(pn.Column(self.checkmesh_view(), width=470, sizing_mode="fixed", margin=(5, 40, 5, 10)),
+                   self.quality_box, sizing_mode="stretch_width"), self.quality_plots]
         self.update_quality()
         out += self.fluent_view()
         out += self.section("AI summary of the mesh") + [self.ai_view()]
@@ -178,6 +181,7 @@ class BuildStep:
     def update_quality(self):
         '''Fill the quality view (cached per build; reading takes a few seconds, in the background).'''
         folder = self.app.folder
+        self.quality_plots.objects = []
         if checkmesh_summary(folder) is None:
             self.quality_box.objects = []
             return
@@ -263,13 +267,14 @@ class BuildStep:
             f.height += 22 * (len(groups) - 1)
             figs.append(pane)
         self.set_quality_zoom()
+        self.quality_plots.objects = [self.q_zoom, pn.Row(*figs, sizing_mode="stretch_width")]
         rows = meshquality.summary_rows(groups)
         tab = pn.widgets.Tabulator(pd.DataFrame(rows), show_index=False, disabled=True, layout="fit_data_table",
                                    sizing_mode="stretch_width")
         return [pn.pane.Markdown("**Cells and faces that fail checkMesh (failed), that checkMesh warns about "
                                  "(warning), and lower-quality cells** (non-orthogonality 50-70 deg, skewness 2-4; "
                                  "at most {:,} points per group are drawn). Click a legend entry to hide it."
-                                 .format(meshquality.MAX_POINTS)), tab, self.q_zoom] + figs
+                                 .format(meshquality.MAX_POINTS)), tab]
 
     def set_quality_zoom(self):
         '''Both quality plots to the whole domain or to the wing (equal scales, top view with x downwards).'''
@@ -438,6 +443,7 @@ class BuildStep:
         images = self.images_chk.value
         with self.log_lock:
             self.log_lines, self.log_shown = ["$ ./Allrun.pre" + (" --images" if images else "")], 0
+        self.log_box.visible = True
         self.view3d.objects = []
 
         def run():

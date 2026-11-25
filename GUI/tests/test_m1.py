@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from core import airfoils, blockcheck, estimate, geometry  # noqa: E402
 from core.case import Case  # noqa: E402
-from core.planform import Planform, describe, fit  # noqa: E402
+from core.planform import Planform, describe, fit, reference_values  # noqa: E402
 from core.runner import checkmesh_summary, run_allrun  # noqa: E402
 from core.writer import write_case  # noqa: E402
 
@@ -34,6 +34,14 @@ def test_planform():
         assert abs(getattr(q, k) - v) < 1e-9, (k, getattr(q, k), v)
     d = describe(Planform(half_span=5, root_chord=1, tip_chord=1).to_stations())
     assert abs(d["area, full wing (m2)"] - 10) < 1e-12 and abs(d["aspect ratio"] - 10) < 1e-12
+    # reference values, exact for the rows (by hand: chord 2 up to y = 2, then linear to 1 at y = 10): area 16,
+    # MAC = (2*4 + 8*(4 + 2 + 1)/3) / 16 = 5/3, at y = (4 + 200/3) / 16 = 53/12; LE x of the MAC from int c x_LE dy
+    r = reference_values(st)
+    assert abs(r["area"] - 16) < 1e-12 and abs(r["mac"] - 5 / 3) < 1e-12 and abs(r["y_mac"] - 53 / 12) < 1e-12, r
+    # LE x of the MAC, (1/S) int c x_LE dy = tan(10 deg) int_0^8 (2 - u/8) u du / 16 = tan(10 deg) 8/3 (with the kink
+    # not x_LE at the y of the MAC, as on a single trapezoid)
+    assert abs(r["x_le_mac"] - math.tan(math.radians(10)) * 8 / 3) < 1e-12, r
+    assert abs(describe(st)["mean aerodynamic chord (m)"] - 5 / 3) < 1e-12
 
 
 def test_airfoil_data():

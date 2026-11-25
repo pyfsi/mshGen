@@ -49,5 +49,14 @@ def bokeh(f):
     return pn.pane.Bokeh(f, sizing_mode="stretch_width")
 
 
+def scaled(f):
+    '''Panel pane of a Bokeh figure that shrinks with the page, keeping its aspect ratio (so equal axis scales set
+    from its width and height stay equal), at most its own width: plots next to an input column fit a 1600 px
+    window too.'''
+    w = f.width
+    f.sizing_mode, f.max_width = "scale_width", w
+    return pn.pane.Bokeh(f, sizing_mode="scale_width", max_width=w)
+
+
 def note(text, kind="light"):
     return pn.pane.Alert(text, alert_type=kind)

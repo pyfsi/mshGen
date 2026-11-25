@@ -21,20 +21,21 @@ contours and the tip vortex while it runs, with an AI review of the solution.
 ## Tutorial video
 
 [docs/mshGen_GUI_tutorial.mp4](docs/mshGen_GUI_tutorial.mp4) shows every input and option in a
-complete session: a new wing case through all five steps, ending with a checked OpenFOAM and
-Fluent mesh. Each frame outlines the explained element and shows a pop-up message next to it; there
+complete session: a new wing case through all six steps, from a checked OpenFOAM and Fluent mesh to
+a short test run with OpenFOAM and its AI review. Each frame outlines the explained element and shows a pop-up message next to it; there
 is no audio.
 
 The chapters (embedded in the MP4, and listed in
 [docs/mshGen_GUI_tutorial_chapters.txt](docs/mshGen_GUI_tutorial_chapters.txt)) are: introduction,
-window and sidebar, new case, steps 1–5, files.
+window and sidebar, new case, steps 1–6, files.
 
 The video is recorded from the real GUI by `tools/tutorial/record.py`:
 - it drives a headless Firefox through the session;
 - the 3D views are drawn with Plotly's static export, because headless Firefox has no WebGL.
 
-After changes to the GUI, regenerate it (about 15 minutes; needs OpenFOAM and ParaView for the
-build in step 5):
+After changes to the GUI, regenerate it (about 20 minutes; needs OpenFOAM and ParaView for the
+build in step 5, OpenFOAM for the test run in step 6 (60 iterations on at most 16 free cores) and the
+Claude Code CLI for the AI review):
 
 ```
 python GUI/tools/tutorial/record.py        # writes GUI/docs/mshGen_GUI_tutorial.mp4
@@ -78,17 +79,24 @@ supported by your browser". The GUI checks the browser when the page opens:
   scales, orthographic, about 1–2 s per view), with view buttons (3D, top, front, side) and
   azimuth / elevation / zoom sliders. The picture is zoomed to fill the frame.
 
-The sidebar switch **3D views: auto / interactive / image** overrides the choice, and so does the
-URL parameter `view3d`, e.g. `/app?case=MegAWES_wing&step=5&view3d=image`. Interactive views are
+The URL parameter `view3d` (auto / interactive / image) overrides the choice, e.g.
+`/app?case=MegAWES_wing&step=5&view3d=image`. Interactive views are
 nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.force-enabled = true`.
 
 ## In the GUI
+
+**Header**: a short fact or quote of the day (one per day of the year, `core/quotes.py`), and
+**Undo** / **Redo** next to the theme toggle: every edit of the case (up to 100 steps back, until
+the case is reloaded), including Make mesh and the mesh optimiser.
 
 **Sidebar**
 - **Case**: select a case from `cases/`.
 - **Save** writes `case.json` and all case files. If the geometry changed, it first recomputes the
   block vertices. **Revert** reloads the saved case.
-- **Status**: unsaved changes, estimated cells, block vertices, block check, problems.
+- **Status**: unsaved changes, estimated cells, folder, and problems if there are any.
+- **Steps**, each with its status: ✔ done/valid, ⚠ needs attention (e.g. block vertices outdated,
+  more cells than the maximum, settings changed after the last build, a test run of an older mesh),
+  ✖ error (geometry problems, invalid blocks), ○ not done yet (no mesh, no test run), ▶ running.
 - **New case**: either a **New wing** (library airfoil, default planform, mshGen defaults) or
   **From example** (any script in `examples/`).
 
@@ -97,13 +105,15 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
 - Planform: either **Parameters** (half-span, root/tip chord, constant-chord part, LE sweep, twist at
   root and tip, dihedral), which generate the table, or the **Table** itself (station, y, chord,
   twist, dx, dz; insert or delete rows). Changing the span also scales the slices (option).
-- Plots (zoom with the mouse wheel; click a legend entry to hide it):
+- Plots (zoom with the mouse wheel; click a legend entry to hide it); the 3D view takes the full
+  page width below:
   - the airfoil as mshGen reads it: points, removed point, splines, camber line;
   - the root section in mesh coordinates;
   - top view with the near-wake line;
   - front view;
   - 3D view (drag to rotate; an image with view controls if the browser has no WebGL).
-- **Derived values** (left, under the planform): span, area, aspect ratio, taper, MAC, sweep, twist.
+- **Derived values** (below the plots): span, area, aspect ratio, taper, mean aerodynamic chord and
+  its spanwise position (exact for the planform rows), sweep and dihedral outboard, twist.
 - **Block vertices** follow the geometry: they are recomputed with mshGen's defaults when the
   root section, COG or airfoil changes, either on Save or with the button. The edge resolution is
   kept unless the airfoil changed.
@@ -114,6 +124,10 @@ nicer: in Firefox, WebGL can often be enabled in `about:config` with `webgl.forc
 **2. Domain** (editable)
 - C-grid radius R/c (the block vertices follow it; optimise the cells again in step 4).
 - Far field (`symTip`) position.
+- **Make mesh (slices, block vertices, cells)**: steps 3 and 4 in one go, in the background (1–3
+  minutes): suggest slices (3a), recompute outdated block vertices, suggest block vertices (3b),
+  optimise the cells and gradings for the targets (4). One Undo reverts it; check the result in
+  steps 3 and 4, then build in step 5.
 - Plots: the root plane with the C-domain and the root section, and the domain seen from above
   with the planform and patches. (The exterior block vertices and the slices are in step 3.)
 
@@ -140,14 +154,13 @@ gradings are not set here (step 4).
   smooth expansion, wake line along the flow. The suggestion is drawn dashed, with a before/after
   table; Apply or Discard. Details: [docs/block_optimiser.md](docs/block_optimiser.md).
 - SPLIT: wing surface as wingUp / wingDown.
-- **Top view** with the selected slice in red, and the **block layout** of that slice, exactly as
-  mshGen generates it. Colours show valid, skewed and folded blocks; hover a block for its number and
+- **Top view** with the selected slice in red (scaled to the wing and the slices of the case), and the
+  **block layout** of that slice, exactly as mshGen generates it. Colours show valid, skewed and folded blocks; hover a block for its number and
   corner angles. Zoom presets for the whole domain, the airfoil and the trailing edge.
 - Cells and gradings along the block edges are set in step 4.
 
-**Blocks** in the sidebar (all steps): a status line for the block vertices and the block check; its
-**Details** open by themselves when the vertices are outdated or a block is invalid. Step 3b, where
-the vertices are edited, shows the same panel in full:
+**Block vertices and block check** (step 3b, below the plots; the sidebar shows its result as the
+status of step 3b):
 - Where the vertices come from: mshGen defaults, outdated, or custom.
 - Recompute button.
 - Warnings for missing mshGen defaults and for vertices off the outer boundary.
@@ -197,8 +210,8 @@ the vertices are edited, shows the same panel in full:
     wall-normal cell height, wall-normal and wake distributions.
 
 **5. Build & check**
-- **Options**: Fluent export, images (13 ParaView views), and the environment modules (Python,
-  OpenFOAM, ParaView).
+- **Options**: images (14 ParaView views; on by default), Fluent export (off by default for new
+  cases), and the environment modules (Python, OpenFOAM, ParaView).
 - **Save and build mesh**: saves the case, runs the block check, then `Allrun.pre` with a live log.
   checkMesh also writes the quality fields (non-orthogonality, skewness, aspect ratio per cell), the
   cell centres and the sets of flagged cells and faces.
@@ -212,14 +225,18 @@ the vertices are edited, shows the same panel in full:
   in Fluent).
 - **AI summary of the mesh**: Claude (`claude-opus-5-5`) reviews the mesh: what is good, a suggested
   modelling approach (turbulence model, wall treatment for the y+, ...), what can be improved, things
-  to consider and assumptions, a crazy idea, and a motivating end. **Write AI summary** sends
+  to consider and assumptions, a crazy idea, and a motivating end ("Finally, don't forget to bring
+  cake to the office!"). **Write AI summary** sends
   technical facts of the case and its build to Claude through Claude Code with your login (no API
   key, see [AI summary](#ai-summary)): geometry, flow, targets, cell counts, checkMesh results, the
   flagged groups with their position, y+ on the walls (no case name, description, user name or file
   paths). The facts sent can be opened below the button. The summary is saved in the case folder
   (`ai_summary.md`) and shown again later, marked when the mesh was built again afterwards.
 - **3D view of the wall patches**, with cell edges (drag to rotate, or an image, see
-  [3D views and WebGL](#3d-views-and-webgl)), and the images.
+  [3D views and WebGL](#3d-views-and-webgl)), and the images: the root plane (overview, airfoil,
+  LE, TE, first cells), the wing from above and below, the planform, the tip, cuts at constant x near
+  the tip, and the mesh inside the wing contour beyond the tip (the blocks inside the airfoil, with
+  the contour drawn in orange).
 
 **6. Test run** (OpenFOAM simpleFoam on the mesh of the last build; use a COARSE mesh for quick tests:
 about 1 s per iteration on 16 cores for 1.4 million cells)
@@ -234,8 +251,9 @@ about 1 s per iteration on 16 cores for 1.4 million cells)
 - **Settings of the test run**: a table of everything else: steady incompressible RANS (SIMPLE),
   freestream velocity/pressure at the inlet and outlet, no-slip walls with Spalding's wall function
   (any y+), symmetry at the root and the far field, 0.5 % inflow turbulence with ν_t/ν = 10,
-  linearUpwind for U and upwind for the turbulence, force coefficients on the half wing (area, mean
-  aerodynamic chord, quarter chord at the root), the write interval (every iterations/10, at least 20).
+  linearUpwind for U and upwind for the turbulence, force coefficients on the half wing (reference
+  values exact for the planform rows: the projected area, the mean aerodynamic chord and the moment
+  about its quarter chord), the write interval (every iterations/10, at least 20).
 - **Save and run**: saves the case and writes `run/` in the case folder (the mesh is linked, earlier
   results are removed), then runs `run/Allrun`: decomposePar, `mpirun simpleFoam -parallel`,
   reconstructPar of the last time. **Stop** asks simpleFoam to write the current iteration and end
@@ -243,14 +261,20 @@ about 1 s per iteration on 16 cores for 1.4 million cells)
   iteration and the time left; the log follows the solver. Rebuilding the mesh in step 5 is refused
   while a run uses it; results of an older mesh are marked.
 - **Convergence** (live): the initial residuals of all equations (log scale), and Cl, Cd and Cm (pitch)
-  over the iterations (hover for values).
+  over the iterations (hover for values). The ranges follow the data: all residuals, and the force
+  coefficients of the last 80 % of the iterations (the first ones are far off); after a zoom they stay
+  until the reset tool.
 - The results below are read at every write while the solver runs:
   - **y+**: per wall patch, the solution's min / average / max next to the prediction of step 4 (flat
     plate, local chord) and the target; y+ along the airfoil at the selected section.
   - **Pressure distribution**: Cp along the upper and lower side at a section (the row of wall faces
     nearest to the section plane; red x: reversed flow at the wall). The side of a face comes from the
-    patch (wingUp / wingDown) or, for a wing surface that is not split, from the geometry: the local
-    section, corrected per row of faces for blockMesh's interpolation between the slices. The share of the upper and lower
+    patch (wingUp / wingDown) or, for a wing surface that is not split, from the geometry: the section
+    as the mesh has it (the slice sections interpolated linearly, as blockMesh does; planform rows
+    between two slices do not show in the mesh), corrected per row of faces. The faces of a row share
+    y up to a small spread on twisted parts; the rows are found from the gaps between them. The tip
+    cap is found by its plane (without SPLIT, wingTip also holds the wing surface of the tip layer).
+    The share of the upper and lower
     side with reversed flow (chord- and span-weighted; the nose x/c < 0.05 is left out, where the
     attached flow runs forward from the stagnation point), and the wing seen from above: Cp on both
     sides, reversed flow dotted, the section planes dashed.
@@ -363,7 +387,7 @@ earlier quality optimiser at a fixed cell count (`core/quality.py`, no longer in
 **test_m5** (`python GUI/tests/test_m5.py`, about 5 minutes, needs OpenFOAM and ParaView):
 - The full chain is driven through the app: new wing, planform, flow, split and an extra slice, the
   mesh optimiser (COARSE, y+ 30), then the build with Fluent and images.
-- It checks the cells, y+ measured per wall patch, the Fluent zones, the 13 images and the 3D view.
+- It checks the cells, y+ measured per wall patch, the Fluent zones, the 14 images and the 3D view.
 
 **test_m4** (`python GUI/tests/test_m4.py [--openfoam]`): the sizing functions of `core/sizing.py`
 (the step 4 helpers before the mesh optimiser).

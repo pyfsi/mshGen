@@ -251,9 +251,12 @@ def check_results(c, folder, run, reader):
     for i, y in enumerate(s["sections"]):
         cs = sm.cp_section(c, af, wall, y, s["V"], fd)
         assert cs, y
+        n_row = len(cs["upper"]["s"]) + len(cs["lower"]["s"])
         for side in ("upper", "lower"):
             o = cs[side]
-            assert len(o["s"]) >= 10, (y, side, len(o["s"]))
+            # the whole row: both sides around the chord (a row cut short on a twisted part lost one side)
+            assert len(o["s"]) >= max(10, 0.3 * n_row), (y, side, len(o["s"]), n_row)
+            assert o["s"].min() < 0.02 and o["s"].max() > 0.98, (y, side, o["s"].min(), o["s"].max())
             assert o["s"].min() > -0.02 and o["s"].max() < 1.02, (y, side, o["s"].min(), o["s"].max())
         pl = sm.surface(run, t, "section{}".format(i), ["p", "U"])         # cut points may be snapped to mesh points
         chord = section_params(c.wing_stations or [[0, 0, 1.0, 0, 0, 0]], y)[0]

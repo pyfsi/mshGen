@@ -1,13 +1,14 @@
 '''
 record.py: records the tutorial video of the mshGen GUI (GUI/docs/mshGen_GUI_tutorial.mp4)
 
-A headless Firefox drives the real GUI through a complete session: create a wing case and go through all five
+A headless Firefox drives the real GUI through a complete session: create a wing case and go through all six
 steps, using or pointing at every input and option. Each frame shows the GUI with the explained element
 outlined and a pop-up message next to it; frames are held long enough to read the message. No audio.
 The 3D views (Plotly, WebGL) cannot be drawn by headless Firefox: the same figures are rendered with Plotly's
 static export (kaleido) and placed over them.
 
-Usage (Anaconda module loaded; needs OpenFOAM and ParaView for the build in step 5, about 15 minutes):
+Usage (Anaconda module loaded; needs OpenFOAM and ParaView for the build in step 5 and the test run in step 6,
+and the Claude Code CLI for the AI summary and review; about 20 minutes):
     python GUI/tools/tutorial/record.py [--out GUI/docs/mshGen_GUI_tutorial.mp4] [--frames DIR]
 The tutorial case cases/tutorial_wing is created and deleted again.
 '''
@@ -185,14 +186,15 @@ def scenario(r, url, login_png):
     r.chapter("Introduction")
     r.card("mshGen GUI", [
         "This video shows every input and option of the GUI, in a complete session:",
-        "a new wing case, from the geometry to a checked OpenFOAM and Fluent mesh.",
+        "a new wing case, from the geometry to a checked OpenFOAM and Fluent mesh and a test run.",
         "",
         "  1. Geometry      airfoil, planform, mesh origin",
         "  2. Domain        size of the C-grid, far field",
         "  3a. Slicing      slices along the span, aileron and patch layers",
         "  3b. Blocking     airfoil and exterior vertices, block layout",
         "  4. Meshing       level, targets, flow, mesh optimiser, tables, analysis",
-        "  5. Build & check blockMesh, checkMesh, flagged cells, AI summary, Fluent, images"],
+        "  5. Build & check blockMesh, checkMesh, flagged cells, AI summary, Fluent, images",
+        "  6. Test run      OpenFOAM simpleFoam: convergence, y+, Cp, contours, tip vortex, AI review"],
         seconds=12, sub="Structured C-grid meshes of wings with mshGen and blockMesh")
     r.card("Start the GUI", [
         "On the cluster, in a terminal:",
@@ -454,9 +456,10 @@ def scenario(r, url, login_png):
     r.do("T.radio('5. Build & check')", 5)
     b.inject()
     r.do("T.check('also make images (ParaView views)', true)", 1)
+    r.do("T.check('export to Fluent (foamMeshToFluent)', true)", 1)
     r.do("T.card('Environment modules', true)", 2)
-    r.shot("Step 5 · Options", "Images (13 ParaView views), export to Fluent, and the modules "
-           "of Python, OpenFOAM and ParaView on this cluster.",
+    r.shot("Step 5 · Options", "Images (14 ParaView views; on by default), export to Fluent (off by default, "
+           "switched on here), and the modules of Python, OpenFOAM and ParaView on this cluster.",
            W_("also make images (ParaView views)"),
            also=[W_("export to Fluent (foamMeshToFluent)"), CARD("Environment modules")], where="right")
     r.do("T.card('Environment modules', false)", 1)
@@ -493,8 +496,72 @@ def scenario(r, url, login_png):
            TYPED("Plotly"), where="left")
     r.wait_for("!!T.find('Images (last build with images)', 'has')", 120)
     r.shot("Step 5 · Images", "The images of the build: ParaView views (root plane, "
-           "leading and trailing edge, first cells, 3D wing, planform, tip, cuts).",
+           "leading and trailing edge, first cells, 3D wing, planform, tip, cuts, the mesh inside the wing "
+           "contour beyond the tip).",
            HAS("Images (last build with images)"), where="left")
+
+    # ---------------- step 6 ---------------- #
+    from core import simulation as sm
+    r.fig3d = None
+    ncpu = os.cpu_count() or 1
+    cores = max(2, min(16, ncpu - int(round(sm.busy_processes())) - 2))     # never more than the free cores
+    cores_title = "Cores (this machine has {})".format(ncpu)
+    r.chapter("Step 6: Test run")
+    r.do("T.radio('6. Test run')", 6)
+    b.inject()
+    r.do("T.set({}, {})".format(q(cores_title), cores), 2)
+    r.do("T.set('Iterations', 60)", 2)
+    r.shot("Step 6 · Inputs", "A short OpenFOAM run (simpleFoam) on the mesh of step 5: cores, free-stream velocity "
+           "(the U of step 4), angle of attack, turbulence model, iterations and the spanwise section planes. Here: "
+           "{} cores, 60 iterations.".format(cores), W_(cores_title),
+           also=[W_("Angle of attack alpha (deg)"), W_("Turbulence model"), W_("Iterations")], where="right")
+    r.shot("Step 6 · Machine load", "The busy processes on this machine (all users, e.g. a Fluent job). If this run "
+           "would share cores, a warning says how many are free and Run asks for a second click: a parallel run on "
+           "shared cores is far slower.", HAS("Machine now"), where="right")
+    r.shot("Step 6 · Settings of the test run", "Everything else of the set-up: boundary conditions, wall "
+           "functions, schemes, solvers, the reference values of the force coefficients, writing.",
+           TYPED("Tabulator", 0), where="left")
+    r.shot("Step 6 · Run", "<b>Save and run</b> writes run/ in the case folder (the mesh is linked) and runs "
+           "decomposePar, simpleFoam in parallel and reconstructPar. <b>Stop</b> writes the current iteration and "
+           "ends.", BTN("Save and run (Allrun)"), click=BTN("Save and run (Allrun)"), where="right")
+    r.do("T.click('Save and run (Allrun)')", 5)
+    r.wait_for("!!T.find('· running', 'has')", 300, 2)
+    r.wait_for("(function(){const v = T.find('Iteration ', 'has'); const m = v && /Iteration (\\d+) of/.exec("
+               "v.model.object || ''); return !!m && +m[1] >= 10})()", 900, 2)       # at least 10 iterations
+    time.sleep(4)
+    b.inject()
+    r.shot("Step 6 · Running", "The progress (iteration, time per iteration, time left) and the log follow the "
+           "solver.", HAS("· running"), also=[HAS("log.simpleFoam (last lines)")], where="right")
+    r.shot("Step 6 · Convergence", "Live: the initial residuals of all equations and the force coefficients Cl, Cd "
+           "and Cm over the iterations (hover for values, click a legend entry to hide it).", HAS("Convergence"),
+           where="left")
+    r.wait_for("!!T.find('finished (exit code', 'has')", 1800, 5)
+    r.wait_for("!!T.find('Reversed flow at the wall', 'has')", 300, 2)
+    time.sleep(8)
+    b.inject()
+    r.shot("Step 6 · y+", "The y+ of the solution per wall patch next to the prediction of step 4 and the target, "
+           "and y+ along the airfoil at the selected section.", HAS("y+ of the solution and the prediction"),
+           also=[TYPED("Tabulator", 1)], where="left")
+    r.shot("Step 6 · Pressure distribution", "Cp along the upper and lower side at a section (choose it above; red "
+           "x: reversed flow at the wall) and the share of the wing with reversed flow.", W_("Section"),
+           also=[HAS("Reversed flow at the wall")], where="right")
+    r.shot("Step 6 · The wing from above", "Cp on the upper and lower side, reversed flow dotted, the section "
+           "planes dashed.", HAS("The wing seen from above"), where="left")
+    r.shot("Step 6 · Contours", "Cp and the velocity magnitude in the section plane around the airfoil.",
+           HAS("Contours of pressure and velocity"), where="left")
+    r.shot("Step 6 · Tip vortex", "Streamwise vorticity and the in-plane velocity in two crossflow planes behind "
+           "the wing.", HAS("Tip vortex"), where="left")
+    r.shot("Step 6 · AI review", "<b>Write AI review</b>: Claude judges the convergence, the plausibility of the "
+           "solution and the effects of the mesh, and recommends changes. It gets only technical facts (shown "
+           "below the button), through Claude Code with your login.", BTN("Write AI review"),
+           click=BTN("Write AI review"), where="right")
+    r.do("T.click('Write AI review')", 5)
+    r.wait_for("!!T.find('### Recommendations', 'has') || !!T.find('No review', 'has') || "
+               "!!T.find('Failed', 'has')", 900, 5)
+    time.sleep(6)
+    b.inject()
+    r.shot("Step 6 · The review", "The review is saved in run/ai_review.md and shown again later.",
+           HAS("### Convergence"), where="left")
 
     r.chapter("Files and next steps")
     r.card("The case folder", [
@@ -503,6 +570,7 @@ def scenario(r, url, login_png):
         "  airfoil.txt, wing.txt, settings/*.csv, generate_mesh.py, images.json",
         "  Allrun.pre         rebuilds everything without the GUI:  ./Allrun.pre [--images]",
         "  constant/polyMesh  OpenFOAM mesh;  fluentInterface/tutorial_wing.msh  Fluent mesh",
+        "  run/               test run of step 6 (Allrun, logs, results, ai_review.md)",
         "",
         "Command line: python GUI/mshgen_case.py list | new | import | write | blocks | build | check",
         "Documentation: GUI/README.md, GUI/PLAN.md, LIMITATIONS.md"], seconds=14)

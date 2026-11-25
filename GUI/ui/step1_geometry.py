@@ -109,6 +109,7 @@ def airfoil_data(name, filename):
 
 class GeometryStep:
     title = "1. Geometry"
+    intro = 'The wing: case type, airfoil, mesh origin and planform.'
 
     def __init__(self, app):
         self.app = app
@@ -133,10 +134,10 @@ class GeometryStep:
             ("Parameters", pn.Column(*self.params.values(), self.param_msg)),
             ("Table", pn.Column(self.table, pn.Row(self.add_row_btn, self.del_row_btn), self.table_msg)))
         self.derived = pn.Column(sizing_mode="stretch_width")
-        self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs,
-                                      pn.pane.Markdown("### Derived values"), self.derived)
+        self.planform_box = pn.Column(pn.pane.Markdown("### Planform"), self.planform_tabs)
 
         self.plots = pn.Column(sizing_mode="stretch_width")
+        self.view3d_box = pn.Column(sizing_mode="stretch_width")
 
         self.dim.param.watch(self.on_dim, "value")
         self.airfoil.param.watch(self.on_airfoil, "value")
@@ -154,7 +155,7 @@ class GeometryStep:
             pn.Card(self.support, title="What mshGen does for this airfoil", collapsed=True),
             pn.pane.Markdown("### Mesh origin (COG)"), pn.Row(self.cog_x, self.cog_z),
             self.planform_box,
-            width=430, sizing_mode="fixed")
+            width=430, sizing_mode="fixed", margin=(5, 40, 5, 10))
 
     # ---------------- load case into widgets ---------------- #
     def load(self):
@@ -190,7 +191,11 @@ class GeometryStep:
             self.planform_tabs.active = 1
 
     def view(self):
-        return [pn.Row(self.inputs, self.plots, sizing_mode="stretch_width")]
+        out = [pn.Row(self.inputs, self.plots, sizing_mode="stretch_width")]
+        if self.app.case.dim == "3D":
+            for title, box in (("Derived values", self.derived), ("3D view of the half wing", self.view3d_box)):
+                out += [pn.layout.Divider(margin=(18, 0, 6, 0)), pn.pane.Markdown("## " + title), box]
+        return out
 
     # ---------------- callbacks ---------------- #
     def _changed(self, render=True):
@@ -208,7 +213,8 @@ class GeometryStep:
         finally:
             self._updating = False
         self.app.notify("info", "Switched to " + event.new + ": slices set to " + str(self.app.case.blocks.slice_locations))
-        self._changed()
+        self._changed(render=False)
+        self.app.show_step()                        # the 3D view section exists in 3D only
 
     def on_airfoil(self, event):
         if self._updating:
@@ -322,14 +328,16 @@ class GeometryStep:
         if c.dim == "3D":
             try:
                 d = describe(c.wing_stations or [[0, 0, 1.0, 0, 0, 0]])
-                self.derived.objects = [table([{"quantity": k, "value": v} for k, v in d.items()],
-                                              sizing_mode="stretch_width")]
+                d = {k: float("{:.4g}".format(v)) for k, v in d.items()}           # 4 significant digits
+                self.derived.objects = [table([d], sizing_mode="stretch_width")]     # one row, full width
             except Exception as e:  # noqa: BLE001
                 self.derived.objects = [note("Cannot compute the derived values: " + repr(e), "danger")]
         try:
             self.plots.objects = self.make_plots()
+            self.view3d_box.objects = self.make_3d()
         except Exception as e:  # noqa: BLE001
             self.plots.objects = [note("Cannot draw the geometry: " + repr(e), "danger")]
+            self.view3d_box.objects = []
 
     def make_plots(self):
         c = self.app.case
@@ -377,7 +385,13 @@ class GeometryStep:
         f.line(ys, te[:, 1], color=COLORS["te"], line_width=2, legend_label="trailing edge")
         out.append(bokeh(f))
 
-        # 3D view
-        out.append(View3D(self.app, wing_figure(c, outline), wing_patches(c, outline), height=440, slot="geometry",
-                          width=760, title="3D view of the half wing", view=VIEW_3D).panel)
         return out
+
+    def make_3d(self):
+        '''The 3D view of the half wing, full page width (below the inputs and plots).'''
+        c = self.app.case
+        if c.dim != "3D":
+            return []
+        outline = airfoil_data(c.airfoil.name, self.app.airfoil_file).outline()
+        return [View3D(self.app, wing_figure(c, outline), wing_patches(c, outline), height=640, slot="geometry",
+                       width=1400, title="3D view of the half wing", view=VIEW_3D).panel]

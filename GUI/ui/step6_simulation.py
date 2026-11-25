@@ -21,7 +21,7 @@ from collections import deque
 import numpy as np
 import pandas as pd
 import panel as pn
-from bokeh.models import ColumnDataSource, HoverTool, Span
+from bokeh.models import ColumnDataSource, HoverTool, Range1d, Span
 from bokeh.palettes import Category10
 from bokeh.plotting import figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -126,8 +126,9 @@ def render_top(case, wall, V, flow_dir, sections):
     lo, hi = float(np.percentile(cp[keep], 2)), min(1.0, float(np.percentile(cp[keep], 99.5)))
     levels = np.linspace(lo, hi, 25)
     ys = np.linspace(0.0, b2, 201)                          # leading and trailing edge: triangles outside are masked
-    le = np.array([place(np.array([[0.0, 0.0]]), *section_params(case.wing_stations, y), case.cog)[0][0] for y in ys])
-    te = np.array([place(np.array([[1.0, 0.0]]), *section_params(case.wing_stations, y), case.cog)[0][0] for y in ys])
+    sec = [[float(v) for v in sm.mesh_sections(case, y)] for y in ys]     # the wing as the mesh has it
+    le = np.array([place(np.array([[0.0, 0.0]]), *p, case.cog)[0][0] for p in sec])
+    te = np.array([place(np.array([[1.0, 0.0]]), *p, case.cog)[0][0] for p in sec])
     fig = Figure(figsize=(13, 6.6))
     FigureCanvasAgg(fig)
     axes = fig.subplots(2, 1, sharex=True)
@@ -197,6 +198,7 @@ def render_wake(plane, V, c_tip, tip_y, tip_z, x, label):
 
 class SimulationStep:
     title = "6. Test run"
+    intro = 'A short steady RANS run (OpenFOAM simpleFoam) on the mesh; the results update while it runs.'
 
     def __init__(self, app):
         self.app = app
@@ -267,6 +269,7 @@ class SimulationStep:
         for s in self.res_src.values():
             s.data = dict(it=[], r=[])
         self.force_src.data = dict(it=[], Cl=[], Cd=[], Cm=[])
+        self._conv_set = {}                 # another run or case: the ranges follow the data again
         for box in (self.yplus_box, self.cp_box, self.contour_box, self.vortex_box):
             box.objects = []
         self.log.object = ""
@@ -345,20 +348,16 @@ class SimulationStep:
         self._fill_inputs()
         c = self.app.case
         mesh = os.path.isfile(os.path.join(self.app.folder, "constant", "polyMesh", "owner"))
-        intro = pn.pane.Markdown(
-            "_A steady RANS test run (OpenFOAM simpleFoam) on the mesh of the last build, in the case folder "
-            "`run/`. Use the COARSE mesh for quick tests (a few minutes per 100 iterations on 8 cores for about "
-            "1.5 million cells). The results update while the solver runs; they are read at every write "
-            "({} iterations)._".format(sm.write_interval(c.simulation.iterations)))
         inputs = pn.Column(self.cores, self.load_box, pn.Row(self.V, self.alpha), pn.Row(self.model, self.iters),
                            self.sections_in,
-                           pn.Row(self.run_btn, self.stop_btn), self.progress, width=540, sizing_mode="fixed")
-        out = [intro]
+                           pn.Row(self.run_btn, self.stop_btn), self.progress, width=540, sizing_mode="fixed",
+                           margin=(5, 40, 5, 10))
+        out = []
         if not mesh:
             out.append(note("No mesh yet: build it in step 5 first.", "warning"))
-        out += [pn.Row(inputs, pn.Column(pn.pane.Markdown("**Settings of the test run**"), self.defaults,
-                                         sizing_mode="stretch_width"), sizing_mode="stretch_width"),
-                pn.pane.Markdown("**Log**"), self.log_box]
+        out += [pn.Row(inputs, pn.Card(self.defaults, title="Settings of the test run", collapsed=True,
+                                       sizing_mode="stretch_width"), sizing_mode="stretch_width")]
+        out += section("Log") + [self.log_box]
         if os.path.isdir(self.run_dir) and sm.stale(self.app.folder, self.run_dir):
             out.append(note("The mesh was built again after this run: the results below belong to the old mesh.",
                             "warning"))
@@ -373,15 +372,22 @@ class SimulationStep:
         return out
 
     def _conv_figs(self):
+        # explicit ranges, set from the data (_conv_ranges): automatic ranges did not follow the residuals down and
+        # included the first iterations of the force coefficients (about 10 times their converged values)
+        self.conv_ranges = {"res x": Range1d(0, 1), "res y": Range1d(1e-6, 1.0), "force x": Range1d(0, 1),
+                            "force y": Range1d(-1.0, 1.0)}
+        self._conv_set = {}                 # the values set last, per range: a range moved by the user stays
         f = figure(title="Initial residuals", height=300, sizing_mode="stretch_width", y_axis_type="log",
-                   tools="pan,wheel_zoom,box_zoom,reset,save")
+                   tools="pan,wheel_zoom,box_zoom,reset,save", x_range=self.conv_ranges["res x"],
+                   y_range=self.conv_ranges["res y"])
         f.toolbar.logo = None
         f.xaxis.axis_label, f.yaxis.axis_label = "iteration", "initial residual"
         for name, src in self.res_src.items():
             f.line("it", "r", source=src, color=RES_COLORS[name], legend_label=name, line_width=1.5)
         f.legend.click_policy, f.legend.label_text_font_size = "hide", "10px"
-        g = figure(title="Force coefficients", height=300, sizing_mode="stretch_width",
-                   tools="pan,wheel_zoom,box_zoom,reset,save")
+        g = figure(title="Force coefficients (range: the last 80 % of the iterations)", height=300,
+                   sizing_mode="stretch_width", tools="pan,wheel_zoom,box_zoom,reset,save",
+                   x_range=self.conv_ranges["force x"], y_range=self.conv_ranges["force y"])
         g.toolbar.logo = None
         g.xaxis.axis_label, g.yaxis.axis_label = "iteration", "coefficient"
         g.line("it", "Cl", source=self.force_src, color="#1f77b4", legend_label="Cl", line_width=1.5)
@@ -391,6 +397,38 @@ class SimulationStep:
                                         ("Cm", "@Cm{0.0000}")], mode="vline"))
         g.legend.click_policy, g.legend.label_text_font_size = "hide", "10px"
         return [pn.pane.Bokeh(f, sizing_mode="stretch_width"), pn.pane.Bokeh(g, sizing_mode="stretch_width")]
+
+    def _set_range(self, key, lo, hi):
+        '''Set a range of the convergence plots, unless the user zoomed or panned it (reset: it follows again).'''
+        rng, last = self.conv_ranges[key], self._conv_set.get(key)
+        if last is not None and (rng.start, rng.end) != last:
+            return
+        rng.update(start=lo, end=hi, reset_start=lo, reset_end=hi)
+        self._conv_set[key] = (rng.start, rng.end)
+
+    def _conv_ranges(self):
+        '''Ranges of the convergence plots from the data: all residuals (log, padded), the force coefficients of
+        the last 80 % of the iterations (the first ones are far off), the iterations so far.'''
+        res = [np.asarray(src.data["r"], float) for src in self.res_src.values() if len(src.data["r"])]
+        its = [v for src in self.res_src.values() for v in src.data["it"][-1:]]
+        if res:
+            r = np.concatenate(res)
+            r = r[r > 0]
+            if len(r):
+                lo, hi = math.log10(r.min()), math.log10(r.max())
+                self._set_range("res y", 10 ** (lo - 0.25), 10 ** (hi + 0.15))
+            self._set_range("res x", 0, max(its + [1]))
+        d = self.force_src.data
+        if len(d["it"]):
+            n = len(d["it"])
+            k = n // 5 if n >= 10 else 0
+            v = np.concatenate([np.asarray(d[c][k:], float) for c in ("Cl", "Cd", "Cm")])
+            v = v[np.isfinite(v)]
+            if len(v):
+                lo, hi = float(v.min()), float(v.max())
+                pad = max(0.1 * (hi - lo), 0.02 * max(abs(lo), abs(hi)), 1e-4)
+                self._set_range("force y", lo - pad, hi + pad)
+            self._set_range("force x", 0, max(float(d["it"][-1]), 1))
 
     # ---------------- run ---------------- #
     def on_run(self):
@@ -520,6 +558,7 @@ class SimulationStep:
             if fh.get("Cl") is not None and len(fh["Cl"]):
                 self.force_src.data = dict(it=list(fh["Time"]), Cl=list(fh["Cl"]), Cd=list(fh["Cd"]),
                                            Cm=list(fh.get("CmPitch", np.zeros(len(fh["Cl"])))))
+            self._conv_ranges()
         self.progress.object = self._progress_text(st, alive)
         self.update_results()
 
@@ -594,8 +633,7 @@ class SimulationStep:
             if y_sel is not None and y_sel in secs:
                 i = secs.index(y_sel)
                 plane = sm.surface(run, t, "section{}".format(i), ["p", "U"])
-                st_ = case.wing_stations or [[0, 0, 1.0, 0, 0, 0]]
-                sec = section_params(st_, y_sel)
+                sec = [float(v) for v in sm.mesh_sections(case, y_sel)]        # the section as the mesh has it
                 ox, oz = place(airfoil.outline(), *sec, case.cog)
                 out["section_png"] = render_section(plane, np.column_stack((ox, oz)), V, y_sel, sec[0])
             pngs = []

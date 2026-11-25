@@ -26,7 +26,7 @@ from core import blockopt, blocks, sizing
 from core.blockcheck import BLOCKS_2D
 from core.estimate import layer_types
 from core.planform import place, section_params
-from ui.common import note
+from ui.common import note, scaled
 from ui.step1_geometry import airfoil_data, top_view
 
 GROUP_COLOR = {"wake": "#c6dbef", "upper": "#9ecae1", "lower": "#a1d99b", "interior": "#fdd0a2"}
@@ -59,7 +59,11 @@ class SliceTopView:
     optionally the spanwise cell faces (thin lines, step 4).'''
 
     def __init__(self, height=200, tools=""):
-        f = figure(width=PLOT_W, height=height, tools=tools, toolbar_location=None if not tools else "right")
+        # explicit ranges, set from the wing and the slices in update(): automatic ranges kept the extent of the case
+        # shown first when another case (another aircraft) was loaded
+        self.x_range, self.y_range = Range1d(0, 1), Range1d(1, 0)      # y: start > end, the flow downwards
+        f = figure(width=PLOT_W, height=height, tools=tools, toolbar_location=None if not tools else "right",
+                   x_range=self.x_range, y_range=self.y_range)
         f.toolbar.logo = None
         f.xaxis.axis_label, f.yaxis.axis_label = "y (m)", "x (m)"
         self.src_faces = ColumnDataSource(dict(ys=[], xs=[]))
@@ -73,9 +77,8 @@ class SliceTopView:
         self.src_lab = ColumnDataSource(dict(y=[], x=[], text=[]))
         f.text("y", "x", text="text", source=self.src_lab, text_font_size="10px", text_align="left", x_offset=3,
                text_baseline="top", text_color="#555555")
-        f.y_range.flipped = True
         self.figure = f
-        self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
+        self.pane = scaled(f)
 
     def update(self, case, sl, faces=None):
         '''faces: spanwise positions of the cell faces to draw (None: none).'''
@@ -87,6 +90,10 @@ class SliceTopView:
         te = np.array([place(np.array([[1.0, 0.0]]), *section_params(st, y), case.cog)[0][0] for y in ys])
         pad = 0.15 * (te.max() - le.min() + 1e-9)
         lo, hi = float(le.min() - pad), float(te.max() + pad)
+        y0, y1 = min(0.0, float(s[0])), float(max(s[-1], b2))
+        dy = 0.02 * (y1 - y0 + 1e-9)
+        self.x_range.update(start=y0 - dy, end=y1 + dy, reset_start=y0 - dy, reset_end=y1 + dy)
+        self.y_range.update(start=hi, end=lo, reset_start=hi, reset_end=lo)
         self.src_wing.data = dict(y=list(np.r_[ys, ys[::-1]]), x=list(np.r_[le, te[::-1]]))
         self.src_slices.data = dict(ys=[[y, y] for y in s], xs=[[lo, hi]] * len(s))
         self.src_sel.data = dict(y=[s[sl], s[sl]], x=[lo, hi])
@@ -152,7 +159,7 @@ class BlockPlot:
         self.src_ext.on_change("data", lambda attr, old, new: self.on_drag("ext", new))
         self.src_air.on_change("data", lambda attr, old, new: self.on_drag("air", new))
         self.figure = f
-        self.pane = pn.pane.Bokeh(f, sizing_mode="fixed")
+        self.pane = scaled(f)
 
     # ---------------- data ---------------- #
     def update(self, set_range=False):
@@ -285,6 +292,7 @@ class BlockPlot:
 
 class SlicingStep:
     title = "3a. Spanwise slicing"
+    intro = 'Where the block vertices are placed along the span; the cells follow in step 4.'
 
     def __init__(self, app):
         self.app = app
@@ -324,7 +332,7 @@ class SlicingStep:
             pn.pane.Markdown("_Aileron cut position along the chord: fixed by mshGen per wing name (MegAWES: 70 % "
                              "chord on the suction side, cut normal tilted 20 deg); see LIMITATIONS.md item 4._"),
             pn.Row(self.artificious, self.skip),
-            width=470, sizing_mode="fixed")
+            width=470, sizing_mode="fixed", margin=(5, 40, 5, 10))
 
     def load(self):
         pass
@@ -440,6 +448,7 @@ class SlicingStep:
 
 class BlockingStep:
     title = "3b. Airfoil blocking"
+    intro = 'The blocks in each slice: the airfoil and exterior block vertices, checked live.'
 
     def __init__(self, app):
         self.app = app
@@ -505,7 +514,7 @@ class BlockingStep:
             pn.pane.Markdown("### Suggest block vertices"),
             pn.pane.Markdown("_Moves the vertices for orthogonal cells, with priority close to the airfoil: grid "
                              "lines normal to the wall, block corners near 90 deg, smooth expansion, wake line along "
-                             "the flow. Evaluates the blocks, not the cells (about 30 s). Shown dashed in the plot; "
+                             "the flow. Evaluates the blocks, not the cells (about 40 s). Shown dashed in the plot; "
                              "see docs/block_optimiser.md._"),
             pn.Row(self.opt_move, self.opt_focus), self.opt_btn, self.opt_note, self.opt_table,
             pn.Row(self.opt_apply, self.opt_discard),
@@ -514,13 +523,15 @@ class BlockingStep:
                              "every slice. TE (0) and LE (13) are fixed; 14 only places 20 and 21; 16-21 lie "
                              "halfway between their neighbours (mshGen); 15 is not used by mshGen._"),
             self.vert_table, self.cut_msg,
-            pn.pane.Markdown("### Exterior vertices"),
-            pn.pane.Markdown("_x, z in the root plane (m, origin = COG; other slices add dz). They stay on their "
-                             "boundary; 22 (near-wake end) is free._"),
-            self.ext_table,
-            pn.pane.Markdown("### Wing surface patches"), self.split,
-            pn.pane.Markdown("### Block vertices"), self.vertex_box,
-            width=470, sizing_mode="fixed")
+            width=470, sizing_mode="fixed", margin=(5, 40, 5, 10))
+        self.lower = pn.Row(                            # full width, below the plots
+            pn.Column(pn.pane.Markdown("### Exterior vertices"),
+                      pn.pane.Markdown("_x, z in the root plane (m, origin = COG; other slices add dz). They stay on "
+                                       "their boundary; 22 (near-wake end) is free._"),
+                      self.ext_table, width=470, sizing_mode="fixed", margin=(5, 40, 5, 10)),
+            pn.Column(pn.pane.Markdown("### Block vertices and block check"), self.vertex_box,
+                      pn.pane.Markdown("### Wing surface patches"), self.split, sizing_mode="stretch_width"),
+            sizing_mode="stretch_width")
         self.right = pn.Column(self.slice_sel, self.top.pane, self.zoom, self.plot_msg, self.plot.pane, legend,
                                sizing_mode="stretch_width")
 
@@ -540,7 +551,9 @@ class BlockingStep:
     def view(self):
         self.refresh(plot=True, tables=True, set_range=getattr(self, "_first_view", True))
         self._first_view = False
-        return [pn.Row(self.inputs, self.right, sizing_mode="stretch_width")]
+        return [pn.Row(self.inputs, self.right, sizing_mode="stretch_width"),
+                pn.layout.Divider(margin=(18, 0, 6, 0)), pn.pane.Markdown("## Exterior vertices, block check and patches"),
+                self.lower]
 
     def refresh(self, plot=True, tables=True, set_range=False):
         if self.proposal is not None and self._proposal_key != _case_key(self.app.case):
@@ -636,7 +649,7 @@ class BlockingStep:
         move, focus = self.opt_move.value, self.opt_focus.value
         key = _case_key(c)
         self.clear_proposal()
-        self.opt_btn.disabled, self.opt_btn.name = True, "Searching (about 30 s) ..."
+        self.opt_btn.disabled, self.opt_btn.name = True, "Searching (about 40 s) ..."
         self.opt_note.object = ""
 
         def job():

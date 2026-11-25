@@ -27,7 +27,7 @@ import time
 
 import numpy as np
 
-from .planform import place, section_params
+from .planform import place, reference_values, section_params
 
 RUN_DIR = "run"
 SETTINGS_FILE = "settings.json"
@@ -61,19 +61,19 @@ def sections(case):
 
 
 def reference(case):
-    '''Reference values of the force coefficients: area (half wing), length (mean aerodynamic chord), CofR.'''
+    '''
+    Reference values of the force coefficients, exact for the planform rows (planform.reference_values): the
+    projected area of the half wing, the mean aerodynamic chord and its quarter chord as CofR (y = 0, the root).
+    2D: chord 1 x width, the quarter chord.
+    '''
     st = case.wing_stations
     if case.dim == "3D" and st:
-        a = np.asarray(st, dtype=float)
-        y, c = a[:, 1], a[:, 2]
-        area = float(np.trapz(c, y))
-        mac = float(np.trapz(c ** 2, y) / area)
-    else:
-        area = float(case.blocks.slice_locations[-1] - case.blocks.slice_locations[0])   # 2D: chord 1 x width
-        mac = 1.0
-    sec = section_params(st or [[0, 0, 1.0, 0, 0, 0]], 0.0)
-    x, z = place(np.array([[0.25, 0.0]]), *sec, case.cog)
-    return {"Aref": area, "lRef": mac, "CofR": (float(x[0]), 0.0, float(z[0]))}
+        r = reference_values(st, case.cog)
+        return {"Aref": r["area"], "lRef": r["mac"], "CofR": (r["quarter_chord"][0], 0.0, r["quarter_chord"][1]),
+                "about": "the quarter chord of the mean aerodynamic chord"}
+    area = float(case.blocks.slice_locations[-1] - case.blocks.slice_locations[0])
+    x, z = place(np.array([[0.25, 0.0]]), *section_params(st or [[0, 0, 1.0, 0, 0, 0]], 0.0), case.cog)
+    return {"Aref": area, "lRef": 1.0, "CofR": (float(x[0]), 0.0, float(z[0])), "about": "the quarter chord"}
 
 
 def inflow(case):
@@ -128,8 +128,11 @@ def settings_table(case):
                                      "schemes", "linear solvers, relaxation")]
     rows += [
         ("stops at", "{} iterations or residuals p < 1e-5, U and turbulence < 1e-6".format(sim.iterations)),
-        ("force coefficients", "walls; Aref = {:.4g} m2 (half wing), lRef = {:.4g} m (mean aerodynamic chord), CofR "
-                               "= quarter chord at the root".format(ref["Aref"], ref["lRef"])),
+        ("force coefficients", ("walls; Aref = {:.4g} m2 (projected area of the half wing), lRef = {:.4g} m (mean "
+                                "aerodynamic chord), CofR = {} (x = {:.4g} m, z = {:.4g} m); from the planform "
+                                "rows" if case.dim == "3D" else "walls; Aref = {:.4g} m2 (chord 1 x width), lRef = "
+                                "{:.4g} m, CofR = {} (x = {:.4g} m, z = {:.4g} m)").format(
+                                    ref["Aref"], ref["lRef"], ref["about"], ref["CofR"][0], ref["CofR"][2])),
         ("written", "every {} iterations (last two kept), binary".format(write_interval(sim.iterations))),
         ("parallel", "{} cores (decomposePar, scotch; mpirun)".format(sim.cores)),
         ("section planes (y, m)", ", ".join("{:g}".format(y) for y in sections(case))),
@@ -744,20 +747,33 @@ def surface(run, time, name, fields):
     return out
 
 
-SIDE_PATCHES = {"wingUp": "upper", "extra": "upper", "wingDown": "lower",     # mshGen's wall patches ("extra":
-                "wingTip": "side", "wingCut": "side"}                          # the first layers of wingUp)
+# mshGen's wall patches that tell the side ("extra": the first layers of wingUp). Not wingTip: without SPLIT it holds
+# the wing surface of the tip layer and the tip cap (with SPLIT only the cap); classify() finds the cap by its plane.
+SIDE_PATCHES = {"wingUp": "upper", "extra": "upper", "wingDown": "lower", "wingCut": "side"}
 WALL_FIELDS = ["p", "yPlus", "wallShearStress"]
+
+
+def mesh_sections(case, y):
+    '''
+    (chord, beta, dx, dz) at the spanwise positions y as the mesh has them: mshGen places the sections at the slices
+    (planform.section_params) and blockMesh interpolates linearly between the slices (straight spanwise edges), so
+    planform rows between two slices do not show in the mesh (MegAWES: 24 of its 25 rows; on a curved tip the
+    chord differs by 10 % and more). Beyond the tip: the tip section.
+    '''
+    st = case.wing_stations or [[0, 0, 1.0, 0, 0, 0]]
+    s = np.unique(np.asarray(case.blocks.slice_locations, dtype=float))
+    p = np.array([section_params(st, v) for v in s])
+    yy = np.clip(np.abs(np.asarray(y, dtype=float)), s.min(), s.max())
+    return tuple(np.interp(yy, s, p[:, i]) for i in range(4))
 
 
 def local_coords(case, airfoil, xyz):
     '''
-    Section coordinates of wall points (x/c, z/c), from the planform at the point's y (chord, twist, dx, dz) as
-    mshGen places the sections. Between two slices the mesh follows blockMesh's interpolation of the slice sections
-    instead, which differs by up to about 1 % of the chord: classify() corrects this per row of faces.
+    Section coordinates of wall points (x/c, z/c), from the section at the point's y as the mesh has it
+    (mesh_sections). blockMesh interpolates the placed points between the slices, not the twist: up to about 1 % of
+    the chord apart, which classify() corrects per row of faces.
     '''
-    st = np.asarray(case.wing_stations or [[0, 0, 1.0, 0, 0, 0]], dtype=float)
-    y = np.clip(np.abs(xyz[:, 1]), st[:, 1].min(), st[:, 1].max())
-    c, beta, dx, dz = (np.interp(y, st[:, 1], st[:, i]) for i in (2, 3, 4, 5))
+    c, beta, dx, dz = mesh_sections(case, xyz[:, 1])
     cog = case.cog
     X = (xyz[:, 0] + cog[0] + dx) / c
     Z = (xyz[:, 2] + cog[2] - dz) / c
@@ -858,14 +874,13 @@ def cp_section(case, airfoil, wall, y, V, flow_dir=(1.0, 0.0, 0.0)):
     cand = np.where(~wall["side"])[0]
     if not len(cand):
         return None
-    ys = xyz[cand, 1]
-    yr = ys[np.argmin(np.abs(ys - y))]
-    sel = cand[np.abs(ys - yr) <= 3e-7 * (1.0 + abs(yr))]  # one row (face centres differ by rounding)
+    lab, rows = _rows(xyz[cand, 1])
+    sel = cand[lab == int(np.argmin(np.abs(rows - y)))]     # the whole row (see _rows)
     if len(sel) < 6:
         return None
     s, upper = wall["s"][sel], wall["upper"][sel]
     cp = wall["p"][sel] / (0.5 * V ** 2)
-    out = {"y": float(yr)}
+    out = {"y": float(np.mean(xyz[sel, 1]))}
     for name, mask in (("upper", upper), ("lower", ~upper)):
         idx = np.where(mask)[0]
         idx = idx[np.argsort(s[idx])]
@@ -886,11 +901,40 @@ def reversed_flow(s, tau_x):
     return (np.asarray(tau_x) < 0) & (np.asarray(s) > NOSE)
 
 
+def _narrow(ys, new, d):
+    '''True if every row (sorted ys split where new) is narrow against the gaps to its neighbouring rows.'''
+    cut = np.where(new)[0]
+    start, end = np.r_[0, cut + 1], np.r_[cut, len(ys) - 1]
+    gaps = d[cut]
+    return bool(np.all(ys[end] - ys[start] <= 0.1 * np.minimum(np.r_[np.inf, gaps], np.r_[gaps, np.inf])))
+
+
 def _rows(y):
-    '''Row label of each wall face (faces of one spanwise row share y up to rounding) and the y of the rows.'''
+    '''
+    Row label of each wall face and the y of the rows (their smallest y). The faces of one spanwise row share y up to
+    rounding where the wing is straight; where it is twisted and tapered, the centres of the warped faces spread a
+    little (1e-5 of the row height on a 5 deg twist, about 1 % on 30 deg over two rows), while the rows are a cell
+    height apart. The sorted y are split at the gaps above the largest jump between the sizes of the largest fifth
+    of the gaps; a split that leaves a row wide against the gaps around it is not used (then the next jump, finally
+    every gap above 1e-6 (1 + |y|)).
+    '''
+    y = np.asarray(y, dtype=float)
     order = np.argsort(y)
     ys = y[order]
-    new = np.r_[True, np.diff(ys) > 1e-6 * (1.0 + np.abs(ys[1:]))]
+    d = np.diff(ys)
+    tiny = 1e-9 * (1.0 + np.abs(ys[1:]))
+    new = d > 1e-6 * (1.0 + np.abs(ys[1:]))
+    g = np.sort(d[d > tiny])[::-1]
+    if len(g):
+        m = min(len(g), max(1, len(ys) // 5))
+        top = np.r_[g[:m], g[m] if m < len(g) else tiny.min()]
+        ratio = top[:-1] / np.maximum(top[1:], 1e-300)
+        for k in np.argsort(ratio)[::-1][:10]:
+            trial = d > math.sqrt(top[k] * top[k + 1])
+            if _narrow(ys, trial, d):
+                new = trial
+                break
+    new = np.r_[True, new]
     lab = np.empty(len(y), dtype=int)
     lab[order] = np.cumsum(new) - 1
     return lab, ys[new]
@@ -1002,8 +1046,15 @@ def solution_facts(case, case_folder, airfoil, run, quality_groups=None, yplus_p
                          "min / max of the last 20 %": [_r(v[-n:].min()), _r(v[-n:].max())]}
         forces["L/D (last)"] = _r(fh["Cl"][-1] / fh["Cd"][-1]) if fh["Cd"][-1] else None
         ref = st.get("reference") or reference(case)
-        forces["reference"] = {"Aref (m2)": _r(ref["Aref"]), "lRef (m)": _r(ref["lRef"]),
-                               "moment about": "quarter chord at the root, positive nose up"}
+        forces["reference values of this run"] = {
+            "Aref (m2)": _r(ref["Aref"]), "lRef (m)": _r(ref["lRef"]),
+            "moment about": "{} (x = {:.4g} m, z = {:.4g} m), positive nose up".format(
+                ref.get("about", "the quarter chord at the root"), ref["CofR"][0], ref["CofR"][2]),
+            "computed from": ("the planform rows (see mesh, planform): projected area of the half wing and its mean "
+                              "aerodynamic chord" if "about" in ref else
+                              "the planform rows, by an older version of the GUI: lRef by the trapezoidal rule on "
+                              "chord^2, which overestimates the mean aerodynamic chord on tapered parts (exact value: "
+                              "mesh, planform)") if case.dim == "3D" else "chord 1 x the width of the 2D slab"}
         facts["force coefficients (half wing; history every iteration)"] = forces
     yp = yplus_history(run)
     if yp:
@@ -1029,7 +1080,7 @@ def solution_facts(case, case_folder, airfoil, run, quality_groups=None, yplus_p
             if not cs:
                 continue
             d = {}
-            chord = section_params(case.wing_stations or [[0, 0, 1.0, 0, 0, 0]], cs["y"])[0]
+            chord = float(mesh_sections(case, cs["y"])[0])                 # local chord of the mesh
             for side in ("upper", "lower"):
                 o = cs[side]
                 if len(o["s"]) < 3:

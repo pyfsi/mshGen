@@ -7,7 +7,7 @@ A hidden probe (WebGLProbe) asks the browser whether WebGL is available. Each Vi
   - interactive: the Plotly figure (drag to rotate, scroll to zoom), needs WebGL;
   - image:       a matplotlib 3D plot of the same surfaces, rendered on the server as a PNG, with view
                  presets and azimuth / elevation / zoom sliders to turn it.
-The sidebar switch "3D views" (auto / interactive / image) overrides the automatic choice.
+The URL parameter view3d (auto / interactive / image) overrides the automatic choice.
 
 The surfaces are given as patches: (name, points (N x 3), faces (list of vertex index lists), colour).
 '''
@@ -260,7 +260,7 @@ class View3D:
                 return
             self._cache[key] = png
             self.image.object = png
-            self.status.object = "_matplotlib image (no WebGL in this browser or 3D views set to image)_"
+            self.status.object = "_matplotlib image (no WebGL in this browser: turn it with the buttons and sliders)_"
         self.app.run_background(lambda: render_mpl(*args), done, executor=_RENDER)
 
 
