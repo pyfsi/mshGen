@@ -39,7 +39,8 @@ window.T = (function () {
       if (kind === "title") ok = m.title === what || m.label === what || (m.title && m.title.text === what);
       else if (kind === "has") ok = text(m).indexOf(what) >= 0;
       else if (kind === "type") ok = m.type === what;
-      else if (kind === "labels") ok = Array.isArray(m.labels) && m.labels.indexOf(what) >= 0;
+      else if (kind === "labels") ok = Array.isArray(m.labels)          // a label may carry a status mark
+        && m.labels.some((l) => l === what || l.startsWith(what + " "));
       else if (kind === "tabs") ok = Array.isArray(m.tabs) && m.tabs.some((p) => p.title === what);
       if (ok && v.el && v.el.getBoundingClientRect().width > 0) hits.push(v);
     }
@@ -201,7 +202,21 @@ window.T = (function () {
     return hits[n || 0] || null;
   }
   function rect(e) { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; }
+  function scrollEnd(what) {              // scroll the box holding the view with this text to its end (a log)
+    const v = find(what, "has");
+    let e = v ? v.el : null;
+    while (e) {
+      const st = getComputedStyle(e);
+      if (e.scrollHeight > e.clientHeight + 5 && (st.overflowY === "auto" || st.overflowY === "scroll")) {
+        if (e.clientHeight > 600) return false;          // the page itself: leave it
+        e.scrollTop = e.scrollHeight;
+        return true;
+      }
+      e = e.parentElement || (e.getRootNode && e.getRootNode().host) || null;
+    }
+    return false;
+  }
   return { views, find, el, clear, mark, scroll, pop, dot, button, buttonIn, click, set, radio, check, checks, tab,
-           card, cardview, drag, text, typed, rect };
+           card, cardview, drag, text, typed, rect, scrollEnd };
 })();
 true;

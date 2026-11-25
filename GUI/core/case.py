@@ -15,6 +15,7 @@ and the three settings CSVs:
     default_exterior_points_<casename>.csv     <- blocks.exterior_points
     default_resolution_grading_<casename>.csv  <- meshing.edges
 '''
+import hashlib
 import json
 import os
 import re
@@ -251,6 +252,38 @@ class Case:
         if d.get("schema_version", SCHEMA_VERSION) > SCHEMA_VERSION:
             raise ValueError("case.json was written by a newer GUI (schema " + str(d["schema_version"]) + ")")
         return cls.from_dict(d)
+
+
+# ---------------------------------------------------------------------------------------------- #
+# The settings a mesh was built with
+# ---------------------------------------------------------------------------------------------- #
+
+BUILD_FILE = "build.json"                          # written by the GUI after a successful build
+MESH_FREE = ("name", "description", "simulation", "environment")     # settings that do not change the mesh
+
+
+def mesh_key(case):
+    '''Fingerprint of the settings that make the mesh (all but MESH_FREE).'''
+    d = {k: v for k, v in case.to_dict().items() if k not in MESH_FREE}
+    return hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest()
+
+
+def save_build_key(folder, key):
+    with open(os.path.join(folder, BUILD_FILE), "w") as f:
+        json.dump({"mesh settings": key}, f)
+
+
+def build_key(folder):
+    '''The mesh_key of the last build of the mesh in folder, or None if unknown (no build by the GUI, or the mesh
+    was built again afterwards, e.g. with Allrun.pre).'''
+    p, owner = os.path.join(folder, BUILD_FILE), os.path.join(folder, "constant", "polyMesh", "owner")
+    if not (os.path.isfile(p) and os.path.isfile(owner)) or os.path.getmtime(p) < os.path.getmtime(owner):
+        return None
+    try:
+        with open(p) as f:
+            return json.load(f).get("mesh settings")
+    except (OSError, ValueError):
+        return None
 
 
 def _dumps(obj, indent=0):

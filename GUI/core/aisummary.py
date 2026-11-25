@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 
@@ -228,10 +229,23 @@ def _run_cli(system, prompt, binary=None):
            "--no-session-persistence", "--disable-slash-commands", "--strict-mcp-config", "--system-prompt", system]
     work = tempfile.mkdtemp(prefix="mshgen_ai_")             # empty folder: no project files or instructions
     try:
-        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=work, env=_cli_env(),
-                              timeout=CLI_TIMEOUT)
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError("Claude Code did not answer within {} s.".format(CLI_TIMEOUT)) from e
+        # own process group: on a timeout the CLI and everything it started are ended (a process that keeps the
+        # pipes open would otherwise block the GUI's job for ever, past the timeout)
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             cwd=work, env=_cli_env(), start_new_session=True)
+        try:
+            out_s, err_s = p.communicate(prompt, timeout=CLI_TIMEOUT)
+        except subprocess.TimeoutExpired as e:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                p.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            raise RuntimeError("Claude Code did not answer within {} s.".format(CLI_TIMEOUT)) from e
+        proc = subprocess.CompletedProcess(cmd, p.returncode, out_s, err_s)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     try:

@@ -21,6 +21,7 @@ from bokeh.models import ColumnDataSource, HoverTool, Range1d
 from bokeh.plotting import figure
 
 from core import aisummary, meshquality
+from core.case import mesh_key, save_build_key
 from core.results import fluent_zones, measured_yplus, wall_surfaces
 from core.runner import checkmesh_summary, run_allrun, run_quality
 from ui.common import bokeh, note, table
@@ -441,6 +442,7 @@ class BuildStep:
                 return
             _BUILDING.add(folder)
         images = self.images_chk.value
+        key = mesh_key(self.app.case)                   # the settings of this build (saved just before)
         with self.log_lock:
             self.log_lines, self.log_shown = ["$ ./Allrun.pre" + (" --images" if images else "")], 0
         self.log_box.visible = True
@@ -449,6 +451,8 @@ class BuildStep:
         def run():
             try:
                 code = run_allrun(folder, images=images, on_line=self._add_line)
+                if code == 0:
+                    save_build_key(folder, key)
                 self._add_line("== exit code " + str(code))
             except Exception as e:  # noqa: BLE001
                 self._add_line("== error: " + repr(e))

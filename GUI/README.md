@@ -20,25 +20,29 @@ contours and the tip vortex while it runs, with an AI review of the solution.
 
 ## Tutorial video
 
-[docs/mshGen_GUI_tutorial.mp4](docs/mshGen_GUI_tutorial.mp4) shows every input and option in a
-complete session: a new wing case through all six steps, from a checked OpenFOAM and Fluent mesh to
-a short test run with OpenFOAM and its AI review. Each frame outlines the explained element and shows a pop-up message next to it; there
-is no audio.
+[docs/mshGen_GUI_tutorial.mp4](docs/mshGen_GUI_tutorial.mp4) (8:35) shows every input and option in a
+complete session: a new wing case through all six steps, from the geometry and Make mesh to a checked
+OpenFOAM and Fluent mesh with its AI summary, and a short test run with OpenFOAM and its AI review. Each
+frame outlines the explained element and shows a pop-up message next to it; long computations (Make mesh,
+the mesh optimiser, the build, the test run) are shown sped up with the elapsed time. There is no audio.
 
 The chapters (embedded in the MP4, and listed in
-[docs/mshGen_GUI_tutorial_chapters.txt](docs/mshGen_GUI_tutorial_chapters.txt)) are: introduction,
-window and sidebar, new case, steps 1–6, files.
+[docs/mshGen_GUI_tutorial_chapters.txt](docs/mshGen_GUI_tutorial_chapters.txt)) are: introduction, the
+window, new case, steps 1–6, files.
 
 The video is recorded from the real GUI by `tools/tutorial/record.py`:
 - it drives a headless Firefox through the session;
-- the 3D views are drawn with Plotly's static export, because headless Firefox has no WebGL.
+- the 3D views are drawn with Plotly's static export, because headless Firefox has no WebGL;
+- it stays below 10 minutes: the hold times follow the length of the messages, and are scaled down if
+  the video would be longer.
 
-After changes to the GUI, regenerate it (about 20 minutes; needs OpenFOAM and ParaView for the
-build in step 5, OpenFOAM for the test run in step 6 (60 iterations on at most 16 free cores) and the
-Claude Code CLI for the AI review):
+After changes to the GUI, regenerate it (about 30 minutes; needs OpenFOAM and ParaView for the build in
+step 5, OpenFOAM for the test run in step 6 (60 iterations on at most 16 free cores) and the Claude Code
+CLI for the AI summary and review):
 
 ```
 python GUI/tools/tutorial/record.py        # writes GUI/docs/mshGen_GUI_tutorial.mp4
+python GUI/tools/tutorial/record.py --until "Step 4" --out /tmp/t.mp4    # quick check of the first steps
 ```
 
 ## Start the GUI
@@ -95,7 +99,8 @@ the case is reloaded), including Make mesh and the mesh optimiser.
   block vertices. **Revert** reloads the saved case.
 - **Status**: unsaved changes, estimated cells, folder, and problems if there are any.
 - **Steps**, each with its status: ✔ done/valid, ⚠ needs attention (e.g. block vertices outdated,
-  more cells than the maximum, settings changed after the last build, a test run of an older mesh),
+  more cells than the maximum, mesh settings changed after the last build (not the test run, the
+  description or the modules), a test run of an older mesh),
   ✖ error (geometry problems, invalid blocks), ○ not done yet (no mesh, no test run), ▶ running.
 - **New case**: either a **New wing** (library airfoil, default planform, mshGen defaults) or
   **From example** (any script in `examples/`).
@@ -304,6 +309,7 @@ cases/<case>/
   system/ constant/    OpenFOAM files (blockMeshDict is written by generate_mesh.py)
   output_files/ constant/polyMesh/ fluentInterface/ images/ log.*     generated
   constant/C, constant/nonOrthoAngle, skewness, aspectRatio, wallDistance   generated (checkMesh, step 5)
+  build.json           fingerprint of the mesh settings of the last build in the GUI (step 5 status)
   ai_summary.md        AI summary of the last build (step 5, optional)
   run/                 test run (step 6): 0/, constant/ (polyMesh linked to ../../constant/polyMesh),
                        system/, Allrun, settings.json, log.*, processor*/, postProcessing/ (forceCoeffs,

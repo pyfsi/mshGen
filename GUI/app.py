@@ -23,7 +23,7 @@ import panel as pn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import airfoils, blockcheck, estimate, geometry, paths, quotes  # noqa: E402
-from core.case import Case  # noqa: E402
+from core.case import Case, build_key, mesh_key  # noqa: E402
 from core.writer import write_case  # noqa: E402
 from ui.build import BuildStep  # noqa: E402
 from ui.step4_meshing import MeshingStep  # noqa: E402
@@ -225,6 +225,8 @@ class App:
             out[self.build.title] = "busy"
         elif not os.path.isfile(owner):
             out[self.build.title] = "todo"
+        elif build_key(self.folder) is not None:            # built by the GUI: compare the mesh settings only
+            out[self.build.title] = "ok" if build_key(self.folder) == mesh_key(c) else "warn"
         elif self.is_dirty() or (os.path.isfile(case_json) and os.path.getmtime(case_json) > os.path.getmtime(owner)):
             out[self.build.title] = "warn"                  # settings changed after the last build
         else:

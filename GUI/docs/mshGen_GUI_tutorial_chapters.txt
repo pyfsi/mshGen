@@ -1,11 +1,11 @@
 0:00  Introduction
-0:32  The window and the sidebar
-1:33  New case
-1:55  Step 1: Geometry
-5:13  Step 2: Domain
-6:15  Step 3: Blocks
-8:30  Step 4: Meshing - helpers
-10:00  Step 4: Meshing - quality optimiser
-10:33  Step 4: Meshing - settings and preview
-12:07  Step 5: Build & check
-13:39  Files and next steps
+0:24  The window
+1:02  New case
+1:11  Step 1: Geometry
+2:20  Step 2: Domain and Make mesh
+2:58  Step 3a: Spanwise slicing
+3:28  Step 3b: Airfoil blocking
+4:28  Step 4: Meshing
+5:37  Step 5: Build & check
+6:46  Step 6: Test run
+8:25  Files and next steps

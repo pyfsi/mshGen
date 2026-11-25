@@ -364,3 +364,27 @@ warnings and the estimated cell count.
   - The plots next to the inputs in 3b and 4 shrink with the window, keeping their aspect ratio (at most their own
     size): in a 1600 px window (the tutorial's) the block plot's tools, the preview's colour bar and the edge plot
     were cut off. Step 4's "Update preview" sits next to its checkbox.
+- Tutorial video re-recorded (8.5 min, all six steps; Make mesh, the optimiser, the build and the test run sped
+  up as time-lapses with the elapsed time; the AI summary and review live). The recorder waits for rendered text
+  (a Markdown heading "### What is good" is found as "What is good"; it waited for ever before). The CLI call ends
+  its whole process group on a timeout. Step 5's status compares a fingerprint of the mesh settings of the last
+  build (build.json) instead of file times: saving test-run settings no longer marks the mesh as outdated.
+
+## Next tutorial recording (to do, requested 25.11.2026)
+
+Not done yet: a recording takes about 20 minutes. Do these before the next one (`tools/tutorial/record.py`):
+- **Pop-ups must not overlap the outlined elements.** In `tools/tutorial/page.js`, `pop()` puts the pop-up
+  beside the target, but inside it when there is no room (wide elements: the 3D views, the convergence plots,
+  the y+ and pressure sections, the AI texts), and it ignores the other outlined elements (`also`). Try right,
+  left, below and above, and take the first position whose box intersects none of the outlined elements (the
+  ones marked by `mark()`); otherwise the corner of the window with the least overlap. Check every frame with a
+  contact sheet before replacing the video.
+- **Use the MegAWES example** instead of a new wing: New case, From example,
+  `generate_mesh_MegAWES_WING_Niels_split_yplus50.py` (the example of cases/MegAWES_wing, which must not be
+  changed), mesh level COARSE with target y+ 100 (the example has 50), then Make mesh or the optimiser.
+- **Run the test run to convergence:** all initial residuals below 1e-3, at most 500 iterations. Step 6 itself
+  stops at p < 1e-5 and U, turbulence < 1e-6 (residualControl): either make the residual target an input of
+  step 6, or let the recorder press Stop once all residuals are below 1e-3. MegAWES COARSE ran at about
+  0.9 s per iteration on 16 cores, so up to about 8 minutes: a time-lapse frame every 30 s. Keep the video
+  below 10 minutes.
+
